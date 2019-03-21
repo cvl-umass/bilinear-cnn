@@ -356,7 +356,7 @@ def main(args):
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
                                     wd=args.wd, finetune_model=fine_tune)
 
-        scheduler = torch.optim.LambdaLR(optim,
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
                             lr_lambda=lambda epoch: 0.1 ** (epoch // 15))
         logger_name = 'train_logger'
         logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
