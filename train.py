@@ -49,13 +49,13 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
         if optimizer == 'sgd':
             optimizer_ft = optim.SGD([
                 {'params': params_to_update},
-                {'params': fc_params_to_update, 'weight_decay': 0}],
-                lr=lr, momentum=0.3, weight_decay=wd)
+                {'params': fc_params_to_update, 'weight_decay': 1e-8, 'lr': 1}],
+                lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
-                {'params': fc_params_to_update, 'weight_decay': 0}],
-                lr=lr, momentum=0.3, weight_decay=wd)
+                {'params': fc_params_to_update, 'weight_decay': 1e-8, 'lr': 1}],
+                lr=lr, momentum=0.9, weight_decay=wd)
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
     else:
@@ -80,7 +80,7 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
 def train_model(model, dset_loader, criterion,
         optimizer, batch_size_update=256,
         maxItr=50000, logger_name='train_logger', checkpoint_folder='exp',
-        start_itr=0, clip_grad=-1):
+        start_itr=0, clip_grad=-1, scheduler=None):
 
     val_frequency = 10000 // dset_loader['train'].batch_size 
     logger = logging.getLogger(logger_name)
@@ -95,8 +95,10 @@ def train_model(model, dset_loader, criterion,
     best_model_wts = copy.deepcopy(model.state_dict())
 
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
-    update_frequency = batch_size_update // dset_loader['train'].batch_size
+    bs = dset_loader['train'].batch_size
+    update_frequency = batch_size_update // bs 
     model.train()
+    last_epoch = 0 
     for itr in range(start_itr, maxItr):
         # at the end of validation set model.train()
         if (itr + 1) % val_frequency == 0:
@@ -132,6 +134,10 @@ def train_model(model, dset_loader, criterion,
                                                     clip_grad)
                 optimizer.step()
                 optimizer.zero_grad()
+        epoch = ((itr + 1) *  bs) // len(dset_loader['train'].dataset)
+        if epoch > last_epoch and scheduler is not None:
+            last_epoch = epoch
+            scheduler.step()
 
         running_num_data += inputs[0].size(0) 
         running_loss += loss.item() * inputs[0].size(0)
@@ -172,19 +178,24 @@ def train_model(model, dset_loader, criterion,
                                 'Validation', val_loss, val_acc))
 
             plot_log(logger_filename,
-                    logger_filename.replace('history.txt', 'curve.png'), False)
+                    logger_filename.replace('history.txt', 'curve.png'), True)
 
             is_best = val_acc > best_acc
             if is_best:
                 best_acc = val_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
 
-            save_checkpoint({
+            checkpoint_dict = {
                 'itr': itr + 1,
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
-                'best_acc':  best_acc,
-            }, is_best, checkpoint_folder=checkpoint_folder)
+                'scheduler' : scheduler.state_dict(),
+                'best_acc':  best_acc
+            }
+            if scheduler is not None:
+                checkpoint_dict['scheduler'] = scheduler.state_dict()
+            save_checkpoint(checkpoint_dict,
+                    is_best, checkpoint_folder=checkpoint_folder)
             model.train()
 
 
@@ -318,24 +329,26 @@ def main(args):
     init_model_checkpoint = os.path.join(init_checkpoint_folder,
                                         'checkpoint.pth.tar')
     start_itr = 0
+    # if False:
     if not args.train_from_beginning:
         logger_name = 'train_init_logger'
         logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_init_history.txt'), logger_name)
 
+        optim_fc = initialize_optimizer(model, 1.0, optimizer='sgd', wd=1e-8,
+                                    finetune_model=False)
         if os.path.isfile(init_model_checkpoint):
             print("=> loading checkpoint '{}'".format(init_model_checkpoint))
             checkpoint = torch.load(init_model_checkpoint)
             start_itr = checkpoint['itr']
             model.load_state_dict(checkpoint['state_dict'])
+            optim_fc.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint for the fc initialization")
 
-    optim_fc = initialize_optimizer(model, 1.0, optimizer='sgd', wd=1e-8,
-                                finetune_model=False)
     model = model.to(device)
     model = train_model(model, dset_loader, criterion, optim_fc,
             batch_size_update=256,
-            maxItr=40000, logger_name=logger_name,
+            maxItr=10000, logger_name=logger_name,
             start_itr=start_itr,
             checkpoint_folder=init_checkpoint_folder)
 
@@ -344,6 +357,8 @@ def main(args):
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
                                     wd=args.wd, finetune_model=fine_tune)
 
+        scheduler = torch.optim.LambdaLR(optim,
+                            lr_lambda=lambda epoch: 0.1 ** (epoch // 15))
         logger_name = 'train_logger'
         logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_history.txt'), logger_name)
@@ -359,8 +374,15 @@ def main(args):
                 start_itr = checkpoint['itr']
                 model.load_state_dict(checkpoint['state_dict'])
                 optim.load_state_dict(checkpoint['optimizer'])
+                scheduler.load_state_dict(checkpoint['scheduler'])
                 print("=> loaded checkpoint '{}' (iteration{})"
                       .format(checkpoint_filename, checkpoint['itr']))
+
+        '''
+        temp = torch.load('/data/tsungyulin/Research/bilinear-cnn/model/vgg_16_epoch_54.pth')
+        model.module.fc.bias.data.copy_(temp['module.fc.bias'].data)
+        model.module.fc.weight.data.copy_(temp['module.fc.weight'].data)
+        '''
 
         # parallelize the model if using multiple gpus
         # if torch.cuda.device_count() > 1:
@@ -370,7 +392,7 @@ def main(args):
                 batch_size_update=args.batch_size_update_model,
                 maxItr=args.iteration, logger_name=logger_name,
                 checkpoint_folder=checkpoint_folder,
-                start_itr=start_itr)
+                start_itr=start_itr, scheduler=scheduler)
     # do test
     test_loader = torch.utils.data.DataLoader(dset_test,
                         batch_size=args.batch_size, shuffle=False,
