@@ -189,7 +189,6 @@ def train_model(model, dset_loader, criterion,
                 'itr': itr + 1,
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
-                'scheduler' : scheduler.state_dict(),
                 'best_acc':  best_acc
             }
             if scheduler is not None:
