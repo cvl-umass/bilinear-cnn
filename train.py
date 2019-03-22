@@ -248,9 +248,9 @@ def main(args):
         crop_from_size = input_size
         
     if args.dataset in ['inat']:
-        split = {'train': 'train', 'val': 'test'}
+        split = {'train': 'train', 'val': 'val'}
     else:
-        split = {'train': 'train_val', 'val': 'val'}
+        split = {'train': 'train_val', 'val': 'test'}
 
     if len(input_size) > 1:
         assert order == len(input_size)
