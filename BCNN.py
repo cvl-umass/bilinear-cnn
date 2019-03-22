@@ -110,7 +110,7 @@ class BCNNModule(nn.Module):
         z = self.pooling_fn(*x)
 
         # normalization
-        z = torch.sqrt(z + 1e-12)
+        z = torch.sqrt(z + 1e-8)
         z = torch.nn.functional.normalize(z)
 
         # linear classifier

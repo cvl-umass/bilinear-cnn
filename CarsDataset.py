@@ -84,7 +84,7 @@ class CarsDataset(data.Dataset):
             path, target = self.imgs[index]
             img = self.loader(path)
             if self.transform is not None:
-                img = self.transform(img)
+                img = [x(img) for x in self.transform]
 
             if self.target_transform is not None:
                 target = self.target_transform(target)
@@ -97,7 +97,7 @@ class CarsDataset(data.Dataset):
             if self.target_transform is not None:
                 target = self.target_transform(target)
 
-        return img, target, path 
+        return (*img, target, path)
 
     def get_num_classes(self):
         return len(self.classes)

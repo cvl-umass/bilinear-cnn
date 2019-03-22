@@ -68,9 +68,9 @@ class AircraftsDataset(data.Dataset):
 
         if self.load_images:
             path, target = self.imgs[index]
-            img_original = self.loader(path)
+            img = self.loader(path)
             if self.transform is not None:
-                img = self.transform(img)
+                img = [x(img) for x in self.transform]
 
             if self.target_transform is not None:
                 target = self.target_transform(target)
@@ -83,7 +83,7 @@ class AircraftsDataset(data.Dataset):
             if self.target_transform is not None:
                 target = self.target_transform(target)
 
-        return img, target, path 
+        return (*img, target, path)
          
     def get_num_classes(self):
         return len(self.classes)

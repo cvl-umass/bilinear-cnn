@@ -16,6 +16,7 @@ import shutil
 from BCNN import create_bcnn_model
 from test import test_model
 from plot_curve import plot_log
+import gc
 
 def initializeLogging(log_filename, logger_name):
     log = logging.getLogger(logger_name)
@@ -39,7 +40,7 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
     params_to_update = []
     if finetune_model:
         for name,param in model_ft.named_parameters():
-            if name == 'fc.bias' or name == 'fc.weight':
+            if name == 'module.fc.bias' or name == 'module.fc.weight':
                 fc_params_to_update.append(param)
             else:
                 params_to_update.append(param)
@@ -49,18 +50,18 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
         if optimizer == 'sgd':
             optimizer_ft = optim.SGD([
                 {'params': params_to_update},
-                {'params': fc_params_to_update, 'weight_decay': 1e-8, 'lr': 1}],
+                {'params': fc_params_to_update, 'weight_decay': 1e-5, 'lr': 1e-2}],
                 lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
-                {'params': fc_params_to_update, 'weight_decay': 1e-8, 'lr': 1}],
+                {'params': fc_params_to_update, 'weight_decay': 1e-5, 'lr': 1e-2}],
                 lr=lr, momentum=0.9, weight_decay=wd)
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
     else:
         for name,param in model_ft.named_parameters():
-            if name == 'fc.bias' or name == 'fc.weight':
+            if name == 'module.fc.bias' or name == 'module.fc.weight':
                 param.requires_grad = True
                 fc_params_to_update.append(param)
             else:
@@ -79,8 +80,12 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
 
 def train_model(model, dset_loader, criterion,
         optimizer, batch_size_update=256,
-        maxItr=50000, logger_name='train_logger', checkpoint_folder='exp',
+        # maxItr=50000, logger_name='train_logger', checkpoint_folder='exp',
+        epoch=45, logger_name='train_logger', checkpoint_folder='exp',
         start_itr=0, clip_grad=-1, scheduler=None):
+
+    maxItr = epoch * len(dset_loader['train'].dataset) // \
+                    dset_loader['train'].batch_size + 1
 
     val_frequency = 10000 // dset_loader['train'].batch_size 
     logger = logging.getLogger(logger_name)
@@ -101,7 +106,7 @@ def train_model(model, dset_loader, criterion,
     last_epoch = 0 
     for itr in range(start_itr, maxItr):
         # at the end of validation set model.train()
-        if (itr + 1) % val_frequency == 0:
+        if (itr + 1) % val_frequency == 0 or itr == maxItr - 1:
             logger.info('Iteration {}/{}'.format(itr, maxItr - 1))
             logger.info('-' * 10)
 
@@ -122,6 +127,13 @@ def train_model(model, dset_loader, criterion,
 
         with torch.set_grad_enabled(True):
             outputs = model(*inputs)
+            '''
+            for obj in gc.get_objects():
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    print(type(obj), obj.size())
+            import pdb
+            pdb.set_trace()
+            '''
             loss = criterion(outputs, labels)
 
             _, preds = torch.max(outputs, 1)
@@ -134,6 +146,7 @@ def train_model(model, dset_loader, criterion,
                                                     clip_grad)
                 optimizer.step()
                 optimizer.zero_grad()
+
         epoch = ((itr + 1) *  bs) // len(dset_loader['train'].dataset)
         if epoch > last_epoch and scheduler is not None:
             last_epoch = epoch
@@ -143,7 +156,7 @@ def train_model(model, dset_loader, criterion,
         running_loss += loss.item() * inputs[0].size(0)
         running_corrects += torch.sum(preds == labels.data)
 
-        if (itr + 1) % val_frequency == 0:
+        if (itr + 1) % val_frequency == 0 or itr == maxItr - 1:
             running_loss = running_loss / running_num_data
             running_acc = running_corrects.double() / running_num_data
             # print('{} Loss: {:.4f} Acc: {:.4f}'.format('Train',
@@ -208,22 +221,43 @@ def train_model(model, dset_loader, criterion,
     return model
 
 def main(args):
-    split = {'train':args.train_split, 'val':'test'}
-    lr = args.lr
-    input_size = [448]
-    keep_aspect = True
-    model_names_list = ['vgg']
-    tensor_sketch = False 
     fine_tune = True 
     pre_train = True
+
+    lr = args.lr
+    input_size = args.input_size 
+    # input_size = [448]
+    # keep_aspect = True
+    # model_names_list = ['vgg']
+    # tensor_sketch = False
+    # embedding = 8192
+
     order = 2
-    embedding = 8192
+    embedding = args.embedding_dim
+    model_names_list = args.model_names_list
+    tensor_sketch = args.sketch 
+
+    args.exp_dir = os.path.join(args.dataset, args.exp_dir)
+
+    if args.dataset in ['cars', 'aircrafts']:
+        keep_aspect = False
+
+    if args.dataset in ['aircrafts']:
+        crop_from_size = [(x * 256) // 224 for x in input_size]
+    else:
+        crop_from_size = input_size
+        
+    if args.dataset in ['inat']:
+        split = {'train': 'train', 'val': 'test'}
+    else:
+        split = {'train': 'train_val', 'val': 'val'}
 
     if len(input_size) > 1:
         assert order == len(input_size)
 
     if not keep_aspect:
         input_size = [(x, x) for x in input_size]
+        crop_from_size = [(x, x) for x in crop_from_size]
 
     exp_root = '../exp'
     checkpoint_folder = os.path.join(exp_root, args.exp_dir, 'checkpoints')
@@ -241,36 +275,54 @@ def main(args):
 
 
     # ==================  Craete data loader ==================================
+    data_transforms = {
+        'train': [transforms.Compose([
+            transforms.Resize(x[0]),
+            transforms.CenterCrop(x[1]),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
+            for x in zip(crop_from_size, input_size)],
+        'val': [transforms.Compose([
+            transforms.Resize(x[0]),
+            transforms.CenterCrop(x[1]),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
+            for x in zip(crop_from_size, input_size)],
+    }
+
+    '''
     if keep_aspect:
         data_transforms = {
             'train': [transforms.Compose([
-                transforms.Resize(x),
-                transforms.CenterCrop(x),
+                transforms.Resize(x[0]),
+                transforms.CenterCrop(x[1]),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in input_size],
+                for x in zip(crop_from_size, input_size)],
             'val': [transforms.Compose([
                 transforms.Resize(x),
                 transforms.CenterCrop(x),
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in input_size]
+                for x in zip(crop_from_size, input_size)],
         }
     else:
         data_transforms = {
             'train': [transforms.Compose([
-                transforms.Resize(x),
+                transforms.Resize(x[0]),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in input_size],
+                for x in zip(crop_from_size, input_size)],
             'val': [transforms.Compose([
-                transforms.Resize(x),
+                transforms.Resize(x[0]),
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in input_size]
+                for x in zip(crop_from_size, input_size)],
         }
+    '''
 
     # TODO: update the data loaders to take a list of transformantions
     # prepare the training tasks and data loaders
@@ -320,6 +372,8 @@ def main(args):
     # between feature extractors
     model = create_bcnn_model(model_names_list, len(dset['train'].classes), 
                     tensor_sketch, fine_tune, pre_train, embedding, order)
+    model = model.to(device)
+    model = torch.nn.DataParallel(model)
 
     # Setup the loss fxn
     criterion = nn.CrossEntropyLoss()
@@ -328,14 +382,13 @@ def main(args):
     init_model_checkpoint = os.path.join(init_checkpoint_folder,
                                         'checkpoint.pth.tar')
     start_itr = 0
+    optim_fc = initialize_optimizer(model, 1.0, optimizer='sgd', wd=1e-8,
+                                finetune_model=False)
+    logger_name = 'train_init_logger'
+    logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
+                'train_init_history.txt'), logger_name)
     # if False:
     if not args.train_from_beginning:
-        logger_name = 'train_init_logger'
-        logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
-                'train_init_history.txt'), logger_name)
-
-        optim_fc = initialize_optimizer(model, 1.0, optimizer='sgd', wd=1e-8,
-                                    finetune_model=False)
         if os.path.isfile(init_model_checkpoint):
             print("=> loading checkpoint '{}'".format(init_model_checkpoint))
             checkpoint = torch.load(init_model_checkpoint)
@@ -344,20 +397,19 @@ def main(args):
             optim_fc.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint for the fc initialization")
 
-    model = model.to(device)
     model = train_model(model, dset_loader, criterion, optim_fc,
             batch_size_update=256,
-            maxItr=10000, logger_name=logger_name,
+            # maxItr=10000, logger_name=logger_name,
+            epoch=55, logger_name=logger_name,
             start_itr=start_itr,
             checkpoint_folder=init_checkpoint_folder)
 
     if fine_tune:
-        model = torch.nn.DataParallel(model)
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
                                     wd=args.wd, finetune_model=fine_tune)
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
-                            lr_lambda=lambda epoch: 0.1 ** (epoch // 15))
+                            lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
         logger_name = 'train_logger'
         logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_history.txt'), logger_name)
@@ -377,7 +429,7 @@ def main(args):
                 print("=> loaded checkpoint '{}' (iteration{})"
                       .format(checkpoint_filename, checkpoint['itr']))
 
-        '''
+        ''' 
         temp = torch.load('/data/tsungyulin/Research/bilinear-cnn/model/vgg_16_epoch_54.pth')
         model.module.fc.bias.data.copy_(temp['module.fc.bias'].data)
         model.module.fc.weight.data.copy_(temp['module.fc.weight'].data)
@@ -389,14 +441,17 @@ def main(args):
         # Train the miodel
         model = train_model(model, dset_loader, criterion, optim,
                 batch_size_update=args.batch_size_update_model,
-                maxItr=args.iteration, logger_name=logger_name,
+                # maxItr=args.iteration, logger_name=logger_name,
+                epoch=args.epoch, logger_name=logger_name,
                 checkpoint_folder=checkpoint_folder,
                 start_itr=start_itr, scheduler=scheduler)
     # do test
     test_loader = torch.utils.data.DataLoader(dset_test,
                         batch_size=args.batch_size, shuffle=False,
                         num_workers=8, drop_last=False)
+    print('evaluating test data')
     test_model(model, criterion, test_loader, logger_name)
+    
 
 
 if __name__ == '__main__':
@@ -406,8 +461,10 @@ if __name__ == '__main__':
                     of inputs')
     parser.add_argument('--batch_size', default=32, type=int,
             help='size of mini-batch that can fit into gpus (sub bacth size')
-    parser.add_argument('--iteration', default=20000, type=int,
-            help='number of iterations')
+    parser.add_argument('--epoch', default=45, type=int,
+            help='number of epochs')
+    # parser.add_argument('--iteration', default=20000, type=int,
+    #         help='number of iterations')
     parser.add_argument('--lr', default=1e-2, type=float,
             help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float,
@@ -418,10 +475,18 @@ if __name__ == '__main__':
             help='foldername where to save the results for the experiment')
     parser.add_argument('--train_from_beginning', action='store_true',
             help='train the model from first epoch, i.e. ignore the checkpoint')
-    parser.add_argument('--train_split', default='train_val', type=str,
-            help='split used to train augmentor')
+    # parser.add_argument('--train_split', default='train_val', type=str,
+    #         help='split used to train augmentor')
     parser.add_argument('--dataset', default='cub', type=str,
             help='cub | cars | aircrafts')
+    parser.add_argument('--input_size', nargs='+', default=[448], type=int,
+            help='input size as a list of sizes')
+    parser.add_argument('--model_names_list', nargs='+', default=['vgg'],
+            type=str, help='input size as a list of sizes')
+    parser.add_argument('--sketch', action='store_true',
+            help='approximate tensor product in sketch space')
+    parser.add_argument('--embedding_dim', type=int, default=8192,
+            help='the dimension for the tnesor sketch approximation')
     args = parser.parse_args()
 
     main(args)
