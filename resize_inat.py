@@ -9,7 +9,7 @@ import math
 import PIL
 from config import dset_root
 from shutil import copyfile
-
+from random import shuffle
 
 '''
 base_file_list = ['./filelists/metaiNat/base.json',
@@ -45,20 +45,24 @@ for json_file in all_json:
     '''
 
     num_img = len(meta['images'])
+    shuffle(meta['images'])
 
     for idx, x in enumerate(meta['images']):
+        out_name = os.path.join(output_root, x['file_name'])
+        if os.path.isfile(out_name):
+            continue
         im = PIL.Image.open(os.path.join(dset_root['inat'], x['file_name']))
         ratio = to_size / min(im.size)
         resize_to = tuple([math.ceil(y*ratio) for y in im.size])
         resizeImg = im.resize(resize_to, resample=PIL.Image.BILINEAR)
 
-        out_name = os.path.join(output_root, x['file_name'])
         resizeImg.save(out_name)
 
         if (idx + 1) % 1000 == 0:
             print('%s: %d / %d'%(json_file.split('.')[0], idx+1, num_img))
 
-    copyfile(base_file, os.path.join(output_root, json_file))
+
+    # copyfile(base_file, os.path.join(output_root, json_file))
 
 
 
