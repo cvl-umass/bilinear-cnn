@@ -48,6 +48,10 @@ for json_file in all_json:
     shuffle(meta['images'])
 
     for idx, x in enumerate(meta['images']):
+
+        if (idx + 1) % 1000 == 0:
+            print('%s: %d / %d'%(json_file.split('.')[0], idx+1, num_img))
+
         out_name = os.path.join(output_root, x['file_name'])
         if os.path.isfile(out_name):
             continue
@@ -58,8 +62,6 @@ for json_file in all_json:
 
         resizeImg.save(out_name)
 
-        if (idx + 1) % 1000 == 0:
-            print('%s: %d / %d'%(json_file.split('.')[0], idx+1, num_img))
 
 
     # copyfile(base_file, os.path.join(output_root, json_file))
