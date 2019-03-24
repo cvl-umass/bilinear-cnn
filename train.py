@@ -48,9 +48,15 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
 
         # Observe that all parameters are being optimized
         if optimizer == 'sgd':
+            '''
             optimizer_ft = optim.SGD([
                 {'params': params_to_update},
                 {'params': fc_params_to_update, 'weight_decay': 1e-5, 'lr': 1e-2}],
+                lr=lr, momentum=0.9, weight_decay=wd)
+            '''
+            optimizer_ft = optim.SGD([
+                {'params': params_to_update},
+                {'params': fc_params_to_update}],
                 lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
@@ -127,13 +133,6 @@ def train_model(model, dset_loader, criterion,
 
         with torch.set_grad_enabled(True):
             outputs = model(*inputs)
-            '''
-            for obj in gc.get_objects():
-                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                    print(type(obj), obj.size())
-            import pdb
-            pdb.set_trace()
-            '''
             loss = criterion(outputs, labels)
 
             _, preds = torch.max(outputs, 1)
@@ -241,6 +240,8 @@ def main(args):
 
     if args.dataset in ['cars', 'aircrafts']:
         keep_aspect = False
+    else:
+        keep_aspect = True
 
     if args.dataset in ['aircrafts']:
         crop_from_size = [(x * 256) // 224 for x in input_size]
@@ -271,8 +272,6 @@ def main(args):
     import json
     with open(os.path.join(exp_root, args.exp_dir, 'args.txt'), 'a') as f:
         f.write(json.dumps(args_dict, sort_keys=True, indent=4))
-
-
 
     # ==================  Craete data loader ==================================
     data_transforms = {
@@ -347,16 +346,15 @@ def main(args):
                 for x in ['train', 'val']}
         dset_test = AircraftsDataset(dset_root['aircrafts'], 'test',
                             transform=data_transforms['val'])
+    elif args.dataset == 'inat':
+        from iNatDataset import iNatDataset
+        dset = {x: iNatDataset(dset_root['inat'], split[x],
+                            transform=data_transforms[x]) \
+                for x in ['train', 'val']}
+        dset_test = iNatDataset(dset_root['inat'], 'test', 
+                            transform=data_transforms['val'])
     else:
         raise ValueError('Unknown dataset: %s' % task)
-    '''
-    elif task[:len('inat_')] == 'inat_':
-        from iNatDataset import iNatDataset
-        subtask = task[len('inat_'):]
-        subtask = subtask[0].upper() + subtask[1:]
-        dset_list.append(iNatDataset(dset_root['inat'], split, subtask, 
-            load_val_boxes=True, transform=data_transforms['train']))
-    '''
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
                 batch_size=args.batch_size, shuffle=True, num_workers=4,
@@ -387,22 +385,42 @@ def main(args):
     logger_name = 'train_init_logger'
     logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_init_history.txt'), logger_name)
-    # if False:
-    if not args.train_from_beginning:
-        if os.path.isfile(init_model_checkpoint):
-            print("=> loading checkpoint '{}'".format(init_model_checkpoint))
-            checkpoint = torch.load(init_model_checkpoint)
-            start_itr = checkpoint['itr']
-            model.load_state_dict(checkpoint['state_dict'])
-            optim_fc.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint for the fc initialization")
 
-    model = train_model(model, dset_loader, criterion, optim_fc,
-            batch_size_update=256,
-            # maxItr=10000, logger_name=logger_name,
-            epoch=55, logger_name=logger_name,
-            start_itr=start_itr,
-            checkpoint_folder=init_checkpoint_folder)
+    model_train_fc = False
+    fc_model_path = os.path.join(exp_root, args.exp_dir, 'fc_params.pth.tar')
+    if not args.train_from_beginning:
+        if os.path.isdir(fc_model_path):
+            # load the fc parameters if they are already trained
+            print("=> loading fc parameters'{}'".format(fc_model_path))
+            checkpoint = torch.load(fc_model_path)
+            model.load_state_dict(checkpoint['state_dict'])
+            print("=> loaded fc initialization parameters")
+        else:
+            if os.path.isfile(init_model_checkpoint):
+                # load the checkpoint if it exists
+                print("=> loading checkpoint '{}'".format(init_model_checkpoint))
+                checkpoint = torch.load(init_model_checkpoint)
+                start_itr = checkpoint['itr']
+                model.load_state_dict(checkpoint['state_dict'])
+                optim_fc.load_state_dict(checkpoint['optimizer'])
+                print("=> loaded checkpoint for the fc initialization")
+
+            # resume training
+            model_train_fc = True
+    else:
+        # Training everything from the beginning
+        model_train_fc = True
+        start_itr = 0
+
+    if model_train_fc:
+        # do the training
+        model = train_model(model, dset_loader, criterion, optim_fc,
+                batch_size_update=256,
+                epoch=2, logger_name=logger_name, start_itr=start_itr,
+                checkpoint_folder=init_checkpoint_folder)
+        shutil.copyfile(
+                os.path.join(init_checkpoint_folder, 'model_best.pth.tar'),
+                fc_model_path)
 
     if fine_tune:
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
