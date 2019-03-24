@@ -323,38 +323,21 @@ def main(args):
         }
     '''
 
-    # TODO: update the data loaders to take a list of transformantions
-    # prepare the training tasks and data loaders
     if args.dataset == 'cub':
-        from CUBDataset import CUBDataset
-        dset = {x: CUBDataset(dset_root['cub'], split[x], 
-                            transform=data_transforms[x]) \
-                for x in ['train', 'val']}
-        dset_test = CUBDataset(dset_root['cub'], 'test', 
-                            transform=data_transforms['val']) 
+        from CUBDataset import CUBDataset as dataset
     elif args.dataset == 'cars':
-        from CarsDataset import CarsDataset
-        dset = {x: CarsDataset(dset_root['cars'], split[x],
-                            transform=data_transforms[x]) \
-                for x in ['train', 'val']}
-        dset_test = CarsDataset(dset_root['cars'], 'test',
-                            transform=data_transforms['val'])
+        from CarsDataset import CarsDataset as dataset
     elif args.dataset == 'aircrafts':
-        from AircraftsDataset import AircraftsDataset
-        dset = {x: AircraftsDataset(dset_root['aircrafts'], split[x],
-                            transform=data_transforms[x]) \
-                for x in ['train', 'val']}
-        dset_test = AircraftsDataset(dset_root['aircrafts'], 'test',
-                            transform=data_transforms['val'])
+        from AircraftsDataset import AircraftsDataset as dataset
     elif args.dataset == 'inat':
-        from iNatDataset import iNatDataset
-        dset = {x: iNatDataset(dset_root['inat'], split[x],
-                            transform=data_transforms[x]) \
-                for x in ['train', 'val']}
-        dset_test = iNatDataset(dset_root['inat'], 'test', 
-                            transform=data_transforms['val'])
+        from iNatDataset import iNatDataset as dataset
     else:
         raise ValueError('Unknown dataset: %s' % task)
+
+    dset = {x: dataset(dset_root[args.dataset], split[x], 
+                    transform=data_transforms[x]) for x in ['train', 'val']}
+    dset_test = dataset(dset_root[args.dataset], 'test', 
+                    transform=data_transforms['val']) 
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
                 batch_size=args.batch_size, shuffle=True, num_workers=4,
@@ -416,7 +399,7 @@ def main(args):
         # do the training
         model = train_model(model, dset_loader, criterion, optim_fc,
                 batch_size_update=256,
-                epoch=2, logger_name=logger_name, start_itr=start_itr,
+                epoch=55, logger_name=logger_name, start_itr=start_itr,
                 checkpoint_folder=init_checkpoint_folder)
         shutil.copyfile(
                 os.path.join(init_checkpoint_folder, 'model_best.pth.tar'),
