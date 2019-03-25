@@ -76,7 +76,6 @@ class CUBDataset(data.Dataset):
         with open(os.path.join(dataset_root, 'classes.txt'), 'r') as f:
             clsList = f.readlines()
 
-        self.classes = []
         self.classes = [x.split()[1] for x in clsList]
 
         self.imgs = make_dataset(self.dataset_root, self.imageRoot, split, 

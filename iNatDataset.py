@@ -7,31 +7,37 @@ import json
 
 def make_dataset(dataset_root, split):
 
-    with open(os.path.joint(dataset_root, '%s2018.json'%split)) as f:
+    with open(os.path.join(dataset_root, '%s2018.json'%split)) as f:
         data = json.load(f)
-    num_class = len(data['categories'])
-    img = [(im['file_name'], annot['category_id']) \
-                for im, annot in zip(data['images'], data['annotations'])]
+    if split != 'test':
+        num_classes = len(data['categories'])
+        img = [(im['file_name'], annot['category_id']) \
+                    for im, annot in zip(data['images'], data['annotations'])]
+        classes = [x['name'] for x in data['categories']]
+    else:
+        num_classes = -1
+        img = [(im['file_name'], -1) for im in data['images']]
+        classes = []
 
-    return img, num_classes
+    return img, num_classes, classes
 
 
 class iNatDataset(data.Dataset):
     def __init__(self, dataset_root, split, transform=None,
-            transform_square=None, loader=dataset_parser.default_loader):
+            target_transform=None, loader=dataset_parser.default_loader):
         self.loader = loader
         self.dataset_root = dataset_root
 
         if split == 'train_val':
-            self.imgs, self.num_classes = make_dataset(self.dataset_root, 
-                    'train')
-            self.imgs2, _ = make_dataset(self.dataset_root, 'val')
+            self.imgs, self.num_classes, self.classes = make_dataset(
+                                            self.dataset_root, 'train')
+            self.imgs2, _, _ = make_dataset(self.dataset_root, 'val')
             self.imgs = self.imgs + self.imgs2
         else:
-            self.imgs, self.num_classes = make_dataset(self.dataset_root, 
-                        split, self.subtask, from_file=load_from_file)
+            self.imgs, self.num_classes, self.classes = make_dataset(
+                                                self.dataset_root, split)
         self.transform = transform
-        self.transform_square = transform_square
+        self.target_transform = target_transform
         self.dataset_root = dataset_root
 
     def __getitem__(self, index):
