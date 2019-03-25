@@ -22,9 +22,8 @@ class MatrixSquareRootFun(Function):
             Z = T.bmm(Z)
 
         sA = Y.mul(torch.sqrt(normA))
-        ctx.save_for_backward(sA)
+        ctx.save_for_backward(sA, I)
         ctx.numIters = numIters
-        ctx.save_for_backward(I)
 
         return sA
 
