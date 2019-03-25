@@ -6,7 +6,10 @@ import functools
 import operator
 from compact_bilinear_pooling import CountSketch
 from torch.autograd import Function
+from matrixSquareRoot import MatrixSquareRoot 
+import torch.nn.functional as F
 
+matrix_sqrt = MatrixSquareRoot.apply
 
 def create_backbone(model_name, finetune_model=True, use_pretrained=True):
     model_ft = None
@@ -74,7 +77,7 @@ def set_parameter_requires_grad(model, requires_grad):
 
 class BCNNModule(nn.Module):
     def __init__(self, num_classes, feature_extractors=None,
-            pooling_fn=None, order=2):
+            pooling_fn=None, order=2, m_sqrt_iter=0, demo_agg=False):
         super(BCNNModule, self).__init__()
 
         assert feature_extractors is not None
@@ -84,9 +87,18 @@ class BCNNModule(nn.Module):
         self.feature_extractors = feature_extractors
         self.pooling_fn = pooling_fn 
 
-        feature_dim = self.pooling_fn.get_output_dim()
-        self.fc = nn.Linear(feature_dim, num_classes, bias=True) 
+        self.feature_dim = self.pooling_fn.get_output_dim()
+        self.fc = nn.Linear(self.feature_dim, num_classes, bias=True) 
+        # TODO assert m_sqrt is not used together with tensor sketch nor
+        # BCNN models without sharing
+        if m_sqrt_iter > 0:
+            self.m_sqrt = MatrixSquareRoot(m_sqrt_iter,
+                                            int(self.feature_dim ** 0.5))
+        else:
+            self.m_sqrt = None
 
+        # self.m_sqrt_iter = m_sqrt_iter
+        self.demo_agg = demo_agg
         self.order = order
 
     def get_order(self):
@@ -97,7 +109,7 @@ class BCNNModule(nn.Module):
 
         # x1 = x[0]
         # _, _, h1, w1 = x1.shape
-        _, _, h1, w1 = x[0].shape
+        bs, _, h1, w1 = x[0].shape
         for i in range(1, len(args)):
             # x2 = x[i]
             # _, _, h2, w2 = x2.shape
@@ -109,8 +121,15 @@ class BCNNModule(nn.Module):
                 #                                     mode='bilinear')
         z = self.pooling_fn(*x)
 
+        # TODO improve coding style, modulize normlaization operations
+        #      use a list of normalization operations
         # normalization
-        z = torch.sqrt(z + 1e-5)
+
+        if self.m_sqrt is not None:
+            z = self.m_sqrt(z)
+        z = z.view(bs, self.feature_dim)
+        # z = torch.sqrt(z + 1e-5)
+        z = torch.sqrt(F.relu(z) + 1e-5) - torch.sqrt(F.relu(-z) + 1e-5)
         z = torch.nn.functional.normalize(z)
 
         # linear classifier
@@ -197,7 +216,8 @@ class TensorProduct(nn.Module):
         x2 = x2.view(bs, c2, h2*w2)
         y = torch.bmm(x1, torch.transpose(x2, 1, 2))
 
-        return y.view(bs, c1*c2) / (h1 * w1)
+        # return y.view(bs, c1*c2) / (h1 * w1)
+        return y / (h1 * w1)
 
 
 class TensorSketch(nn.Module):
@@ -291,7 +311,7 @@ class ApproxTensorProduct(Function):
 
 def create_bcnn_model(model_names_list, num_classes,
                 tensor_sketch=False, fine_tune=True, pre_train=True,
-                embedding_dim=8192, order=2):
+                embedding_dim=8192, order=2, m_sqrt_iter=0, demo_agg=False):
 
     temp_list = [create_backbone(model_name, finetune_model=fine_tune, \
             use_pretrained=pre_train) for model_name in model_names_list]
@@ -317,4 +337,5 @@ def create_bcnn_model(model_names_list, num_classes,
 
     
     return BCNNModule(num_classes, feature_extractors, 
-                        pooling_fn, order)
+                        pooling_fn, order, m_sqrt_iter=m_sqrt_iter,
+                        demo_agg=demo_agg)

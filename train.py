@@ -103,7 +103,7 @@ def train_model(model, dset_loader, criterion,
     running_loss = 0.0; running_num_data = 0 
     running_corrects = 0
     val_loss_history = []; best_acc = 0.0 
-    best_model_wts = copy.deepcopy(model.state_dict())
+    # best_model_wts = copy.deepcopy(model.state_dict())
 
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
     bs = dset_loader['train'].batch_size
@@ -195,7 +195,7 @@ def train_model(model, dset_loader, criterion,
             is_best = val_acc > best_acc
             if is_best:
                 best_acc = val_acc
-                best_model_wts = copy.deepcopy(model.state_dict())
+                # best_model_wts = copy.deepcopy(model.state_dict())
 
             checkpoint_dict = {
                 'itr': itr + 1,
@@ -215,7 +215,11 @@ def train_model(model, dset_loader, criterion,
     logger.info('Best val accuracy: {:4f}'.format(best_acc))
 
     # load best model weights
-    model.load_state_dict(best_model_wts)
+    best_model_wts = torch.load(os.path.join(checkpoint_folder,
+                                    'model_best.pth.tar'))
+    model.load_state_dict(best_model_wts['state_dict'])
+    # model.load_state_dict(best_model_wts)
+
     # return model, val_acc_history
     return model
 
@@ -352,7 +356,8 @@ def main(args):
     # The argument order is used only when the model parameters are shared
     # between feature extractors
     model = create_bcnn_model(model_names_list, len(dset['train'].classes), 
-                    tensor_sketch, fine_tune, pre_train, embedding, order)
+                    tensor_sketch, fine_tune, pre_train, embedding, order,
+                    m_sqrt_iter=args.matrix_sqrt_iter, demo_agg=args.demo_agg)
     model = model.to(device)
     model = torch.nn.DataParallel(model)
 
@@ -363,7 +368,7 @@ def main(args):
     init_model_checkpoint = os.path.join(init_checkpoint_folder,
                                         'checkpoint.pth.tar')
     start_itr = 0
-    optim_fc = initialize_optimizer(model, 1.0, optimizer='sgd', wd=1e-8,
+    optim_fc = initialize_optimizer(model, 1.0, optimizer='sgd', wd=args.init_wd,
                                 finetune_model=False)
     logger_name = 'train_init_logger'
     logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
@@ -399,7 +404,7 @@ def main(args):
         # do the training
         model = train_model(model, dset_loader, criterion, optim_fc,
                 batch_size_update=256,
-                epoch=55, logger_name=logger_name, start_itr=start_itr,
+                epoch=args.init_epoch, logger_name=logger_name, start_itr=start_itr,
                 checkpoint_folder=init_checkpoint_folder)
         shutil.copyfile(
                 os.path.join(init_checkpoint_folder, 'model_best.pth.tar'),
@@ -446,12 +451,13 @@ def main(args):
                 epoch=args.epoch, logger_name=logger_name,
                 checkpoint_folder=checkpoint_folder,
                 start_itr=start_itr, scheduler=scheduler)
-    # do test
-    test_loader = torch.utils.data.DataLoader(dset_test,
-                        batch_size=args.batch_size, shuffle=False,
-                        num_workers=8, drop_last=False)
-    print('evaluating test data')
-    test_model(model, criterion, test_loader, logger_name)
+    if args.dataset != 'inat':
+        # do test
+        test_loader = torch.utils.data.DataLoader(dset_test,
+                            batch_size=args.batch_size, shuffle=False,
+                            num_workers=8, drop_last=False)
+        print('evaluating test data')
+        test_model(model, criterion, test_loader, logger_name)
     
 
 
@@ -464,12 +470,16 @@ if __name__ == '__main__':
             help='size of mini-batch that can fit into gpus (sub bacth size')
     parser.add_argument('--epoch', default=45, type=int,
             help='number of epochs')
+    parser.add_argument('--init_epoch', default=55, type=int,
+            help='number of epochs for initializing fc layer')
     # parser.add_argument('--iteration', default=20000, type=int,
     #         help='number of iterations')
     parser.add_argument('--lr', default=1e-2, type=float,
             help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float,
             help='weight decay')
+    parser.add_argument('--init_wd', default=1e-8, type=float,
+            help='weight decay for initializing fc layer')
     parser.add_argument('--optimizer', default='sgd', type=str,
             help='optimizer sgd|adam')
     parser.add_argument('--exp_dir', default='exp', type=str,
@@ -488,6 +498,11 @@ if __name__ == '__main__':
             help='approximate tensor product in sketch space')
     parser.add_argument('--embedding_dim', type=int, default=8192,
             help='the dimension for the tnesor sketch approximation')
+    parser.add_argument('--matrix_sqrt_iter', type=int, default=0,
+            help='number of iteration for the Newtons Method approximating' + \
+                    'matirx square rooti. Default=0 [no matrix square root]')
+    parser.add_argument('--demo_agg', action='store_true',
+            help='normalization with democratic aggregation')
     args = parser.parse_args()
 
     main(args)
