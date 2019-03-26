@@ -40,7 +40,8 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
     params_to_update = []
     if finetune_model:
         for name,param in model_ft.named_parameters():
-            if name == 'module.fc.bias' or name == 'module.fc.weight':
+            # if name == 'module.fc.bias' or name == 'module.fc.weight':
+            if 'module.fc' in name:
                 fc_params_to_update.append(param)
             else:
                 params_to_update.append(param)
@@ -67,7 +68,8 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
             raise ValueError('Unknown optimizer: %s' % optimizer)
     else:
         for name,param in model_ft.named_parameters():
-            if name == 'module.fc.bias' or name == 'module.fc.weight':
+            # if name == 'module.fc.bias' or name == 'module.fc.weight':
+            if 'module.fc' in name:
                 param.requires_grad = True
                 fc_params_to_update.append(param)
             else:
@@ -134,6 +136,10 @@ def train_model(model, dset_loader, criterion,
         with torch.set_grad_enabled(True):
             outputs = model(*inputs)
             loss = criterion(outputs, labels)
+            if loss != loss:
+                import pdb
+                pdb.set_trace()
+                print('nan happens')
 
             _, preds = torch.max(outputs, 1)
             
@@ -344,7 +350,7 @@ def main(args):
                     transform=data_transforms['val']) 
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
-                batch_size=args.batch_size, shuffle=True, num_workers=4,
+                batch_size=args.batch_size, shuffle=True, num_workers=8,
                 drop_last=True) for x in ['train', 'val']} 
 
 
@@ -357,7 +363,8 @@ def main(args):
     # between feature extractors
     model = create_bcnn_model(model_names_list, len(dset['train'].classes), 
                     tensor_sketch, fine_tune, pre_train, embedding, order,
-                    m_sqrt_iter=args.matrix_sqrt_iter, demo_agg=args.demo_agg)
+                    m_sqrt_iter=args.matrix_sqrt_iter, demo_agg=args.demo_agg,
+                    fc_bottleneck=args.fc_bottleneck)
     model = model.to(device)
     model = torch.nn.DataParallel(model)
 
@@ -368,7 +375,7 @@ def main(args):
     init_model_checkpoint = os.path.join(init_checkpoint_folder,
                                         'checkpoint.pth.tar')
     start_itr = 0
-    optim_fc = initialize_optimizer(model, 1.0, optimizer='sgd', wd=args.init_wd,
+    optim_fc = initialize_optimizer(model, args.init_lr, optimizer='sgd', wd=args.init_wd,
                                 finetune_model=False)
     logger_name = 'train_init_logger'
     logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
@@ -474,6 +481,8 @@ if __name__ == '__main__':
             help='number of epochs for initializing fc layer')
     # parser.add_argument('--iteration', default=20000, type=int,
     #         help='number of iterations')
+    parser.add_argument('--init_lr', default=1.0, type=float,
+            help='learning rate')
     parser.add_argument('--lr', default=1e-2, type=float,
             help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float,
@@ -503,6 +512,8 @@ if __name__ == '__main__':
                     'matirx square rooti. Default=0 [no matrix square root]')
     parser.add_argument('--demo_agg', action='store_true',
             help='normalization with democratic aggregation')
+    parser.add_argument('--fc_bottleneck', action='store_true',
+            help='add bottelneck to the fc layers')
     args = parser.parse_args()
 
     main(args)

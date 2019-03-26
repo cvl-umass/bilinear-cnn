@@ -77,7 +77,8 @@ def set_parameter_requires_grad(model, requires_grad):
 
 class BCNNModule(nn.Module):
     def __init__(self, num_classes, feature_extractors=None,
-            pooling_fn=None, order=2, m_sqrt_iter=0, demo_agg=False):
+            pooling_fn=None, order=2, m_sqrt_iter=0, demo_agg=False,
+            fc_bottleneck=False):
         super(BCNNModule, self).__init__()
 
         assert feature_extractors is not None
@@ -88,7 +89,11 @@ class BCNNModule(nn.Module):
         self.pooling_fn = pooling_fn 
 
         self.feature_dim = self.pooling_fn.get_output_dim()
-        self.fc = nn.Linear(self.feature_dim, num_classes, bias=True) 
+        if fc_bottleneck:
+            self.fc = nn.Sequential(nn.Linear(self.feature_dim, 1024, bias=True), 
+                                    nn.Linear(1024, num_classes, bias=True))
+        else:
+            self.fc = nn.Linear(self.feature_dim, num_classes, bias=True) 
         # TODO assert m_sqrt is not used together with tensor sketch nor
         # BCNN models without sharing
         if m_sqrt_iter > 0:
@@ -311,7 +316,8 @@ class ApproxTensorProduct(Function):
 
 def create_bcnn_model(model_names_list, num_classes,
                 tensor_sketch=False, fine_tune=True, pre_train=True,
-                embedding_dim=8192, order=2, m_sqrt_iter=0, demo_agg=False):
+                embedding_dim=8192, order=2, m_sqrt_iter=0, demo_agg=False,
+                fc_bottleneck=False):
 
     temp_list = [create_backbone(model_name, finetune_model=fine_tune, \
             use_pretrained=pre_train) for model_name in model_names_list]
@@ -338,4 +344,4 @@ def create_bcnn_model(model_names_list, num_classes,
     
     return BCNNModule(num_classes, feature_extractors, 
                         pooling_fn, order, m_sqrt_iter=m_sqrt_iter,
-                        demo_agg=demo_agg)
+                        demo_agg=demo_agg, fc_bottleneck=fc_bottleneck)
