@@ -245,7 +245,8 @@ class TensorSketch(nn.Module):
         # TODO: implement this
         # The count sketch implemnetation takes the inputs with 
         # the dimension of the channels at the end
-        y = [sketch_fn.forward(x.permute(0,2,3,1)) for x, sketch_fn in zip(args, self.count_sketch)] 
+        y = [sketch_fn.forward(x.permute(0,2,3,1)) \
+                for x, sketch_fn in zip(args, self.count_sketch)] 
 
         z = ApproxTensorProduct.apply(self.output_dim, *y)
         _, h, w, _ = z.shape
@@ -296,6 +297,17 @@ class ApproxTensorProduct(Function):
         for fi in fx:
             re_fi = fi.select(-1, 0)
             im_fi = fi.select(-1, 1)
+
+            temp_norm = re_fi**2 + im_fi**2
+            temp_re = torch.addcmul(re_fout * re_fi, 1, im_fout, im_fi) \
+                        / temp_norm
+            temp_im = torch.addcmul(im_fout * re_fi, -1, re_fout, im_fi) \
+                        /temp_norm
+            grad_re = torch.addcmul(grad_re_prod * temp_re, 1,
+                            temp_im, grad_im_prod)
+            grad_im = torch.addcmul(grad_im_prod * temp_re, -1,
+                            grad_re_prod, temp_im)
+            '''
             grad_re = torch.addcmul(grad_re_prod * re_fi,  1,
                                         grad_im_prod, im_fi)
             grad_im = torch.addcmul(grad_im_prod * re_fi, -1,
@@ -307,6 +319,7 @@ class ApproxTensorProduct(Function):
                                     grad_im, im_fout)
             grad_im =torch.addcmul(grad_im * re_fout, 1,
                                     grad_re, im_fout)
+            '''
             grad_fi = torch.irfft(
                     torch.stack((grad_re, grad_im), grad_re.dim()), 1,
                     signal_sizes=(ctx.embedding_dim,))
