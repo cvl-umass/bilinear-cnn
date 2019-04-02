@@ -13,7 +13,7 @@ import logging
 import sys
 import time
 import shutil
-from BCNN import create_bcnn_model
+from CNN import create_cnn_model
 from test import test_model
 from plot_curve import plot_log
 import gc
@@ -98,6 +98,7 @@ def train_model(model, dset_loader, criterion,
     val_every_number_examples = max(10000,
                     len(dset_loader['train'].dataset) // 5)
     val_frequency = val_every_number_examples // dset_loader['train'].batch_size 
+    # val_frequency = 10000 // dset_loader['train'].batch_size 
     logger = logging.getLogger(logger_name)
     logger_filename = logger.handlers[1].stream.name
 
@@ -132,7 +133,8 @@ def train_model(model, dset_loader, criterion,
             inputs = all_fields[:-2]
             # inputs, labels, _ = next(dset_iter['train'])
 
-        inputs = [x.to(device) for x in inputs]
+        inputs = inputs[0].to(device)
+        # inputs = [x.to(device) for x in inputs]
         labels = labels.to(device)
 
         with torch.set_grad_enabled(True):
@@ -141,7 +143,8 @@ def train_model(model, dset_loader, criterion,
             torch.cuda.synchronize()
             ta = time.perf_counter()
             '''
-            outputs = model(*inputs)
+            outputs = model(inputs)
+            # outputs = model(*inputs)
             loss = criterion(outputs, labels)
 
             _, preds = torch.max(outputs, 1)
@@ -165,8 +168,12 @@ def train_model(model, dset_loader, criterion,
             last_epoch = epoch
             scheduler.step()
 
+        '''
         running_num_data += inputs[0].size(0) 
         running_loss += loss.item() * inputs[0].size(0)
+        '''
+        running_num_data += inputs.size(0) 
+        running_loss += loss.item() * inputs.size(0)
         running_corrects += torch.sum(preds == labels.data)
 
         if (itr + 1) % val_frequency == 0 or itr == maxItr - 1:
@@ -185,16 +192,20 @@ def train_model(model, dset_loader, criterion,
             for all_fields in dset_loader['val']:
                 labels = all_fields[-2]
                 inputs = all_fields[:-2]
-                inputs = [x.to(device) for x in inputs]
+
+                inputs = inputs[0].to(device)
+                # inputs = [x.to(device) for x in inputs]
                 labels = labels.to(device)
 
                 with torch.set_grad_enabled(False):
-                    outputs = model(*inputs)
+                    outputs = model(inputs)
+                    # outputs = model(*inputs)
                     loss = criterion(outputs, labels)
 
                     _, preds = torch.max(outputs, 1)
                     
-                val_running_loss += loss.item() * inputs[0].size(0)
+                # val_running_loss += loss.item() * inputs[0].size(0)
+                val_running_loss += loss.item() * inputs.size(0)
                 val_running_corrects += torch.sum(preds == labels.data)
             val_loss = val_running_loss / len(dset_loader['val'].dataset)
             val_acc = val_running_corrects.double() / len(dset_loader['val'].dataset)
@@ -249,10 +260,7 @@ def main(args):
     # tensor_sketch = False
     # embedding = 8192
 
-    order = 2
-    embedding = args.embedding_dim
-    model_names_list = args.model_names_list
-    tensor_sketch = args.sketch 
+    model_names= args.model_names
 
     args.exp_dir = os.path.join(args.dataset, args.exp_dir)
 
@@ -271,9 +279,6 @@ def main(args):
     else:
         split = {'train': 'train_val', 'val': 'test'}
 
-    if len(input_size) > 1:
-        assert order == len(input_size)
-
     if not keep_aspect:
         input_size = [(x, x) for x in input_size]
         crop_from_size = [(x, x) for x in crop_from_size]
@@ -282,9 +287,6 @@ def main(args):
     checkpoint_folder = os.path.join(exp_root, args.exp_dir, 'checkpoints')
     if not os.path.isdir(checkpoint_folder):
         os.makedirs(checkpoint_folder)
-    init_checkpoint_folder = os.path.join(exp_root, args.exp_dir, 'init_checkpoints')
-    if not os.path.isdir(init_checkpoint_folder):
-        os.makedirs(init_checkpoint_folder)
 
     args_dict = vars(args)
     import json
@@ -308,39 +310,6 @@ def main(args):
             for x in zip(crop_from_size, input_size)],
     }
 
-    '''
-    if keep_aspect:
-        data_transforms = {
-            'train': [transforms.Compose([
-                transforms.Resize(x[0]),
-                transforms.CenterCrop(x[1]),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-            'val': [transforms.Compose([
-                transforms.Resize(x),
-                transforms.CenterCrop(x),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-        }
-    else:
-        data_transforms = {
-            'train': [transforms.Compose([
-                transforms.Resize(x[0]),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-            'val': [transforms.Compose([
-                transforms.Resize(x[0]),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-        }
-    '''
-
     if args.dataset == 'cub':
         from CUBDataset import CUBDataset as dataset
     elif args.dataset == 'cars':
@@ -361,7 +330,6 @@ def main(args):
                 batch_size=args.batch_size, shuffle=True, num_workers=8,
                 drop_last=True) for x in ['train', 'val']} 
 
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     #======================= Initialize the model =========================
@@ -369,10 +337,8 @@ def main(args):
     # The argument embedding is used only when tensor_sketch is True
     # The argument order is used only when the model parameters are shared
     # between feature extractors
-    model = create_bcnn_model(model_names_list, len(dset['train'].classes), 
-                    tensor_sketch, fine_tune, pre_train, embedding, order,
-                    m_sqrt_iter=args.matrix_sqrt_iter, demo_agg=args.demo_agg,
-                    fc_bottleneck=args.fc_bottleneck)
+    model = create_cnn_model(model_names, len(dset['train'].classes), 
+                    fine_tune, pre_train)
     model = model.to(device)
     model = torch.nn.DataParallel(model)
 
@@ -380,50 +346,7 @@ def main(args):
     criterion = nn.CrossEntropyLoss()
     
     #====================== Initialize optimizer ==============================
-    init_model_checkpoint = os.path.join(init_checkpoint_folder,
-                                        'checkpoint.pth.tar')
     start_itr = 0
-    optim_fc = initialize_optimizer(model, args.init_lr, optimizer='sgd', wd=args.init_wd,
-                                finetune_model=False)
-    logger_name = 'train_init_logger'
-    logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
-                'train_init_history.txt'), logger_name)
-
-    model_train_fc = False
-    fc_model_path = os.path.join(exp_root, args.exp_dir, 'fc_params.pth.tar')
-    if not args.train_from_beginning:
-        if os.path.isdir(fc_model_path):
-            # load the fc parameters if they are already trained
-            print("=> loading fc parameters'{}'".format(fc_model_path))
-            checkpoint = torch.load(fc_model_path)
-            model.load_state_dict(checkpoint['state_dict'])
-            print("=> loaded fc initialization parameters")
-        else:
-            if os.path.isfile(init_model_checkpoint):
-                # load the checkpoint if it exists
-                print("=> loading checkpoint '{}'".format(init_model_checkpoint))
-                checkpoint = torch.load(init_model_checkpoint)
-                start_itr = checkpoint['itr']
-                model.load_state_dict(checkpoint['state_dict'])
-                optim_fc.load_state_dict(checkpoint['optimizer'])
-                print("=> loaded checkpoint for the fc initialization")
-
-            # resume training
-            model_train_fc = True
-    else:
-        # Training everything from the beginning
-        model_train_fc = True
-        start_itr = 0
-
-    if model_train_fc:
-        # do the training
-        model = train_model(model, dset_loader, criterion, optim_fc,
-                batch_size_update=256,
-                epoch=args.init_epoch, logger_name=logger_name, start_itr=start_itr,
-                checkpoint_folder=init_checkpoint_folder)
-        shutil.copyfile(
-                os.path.join(init_checkpoint_folder, 'model_best.pth.tar'),
-                fc_model_path)
 
     if fine_tune:
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
@@ -450,11 +373,6 @@ def main(args):
                 print("=> loaded checkpoint '{}' (iteration{})"
                       .format(checkpoint_filename, checkpoint['itr']))
 
-        ''' 
-        temp = torch.load('/data/tsungyulin/Research/bilinear-cnn/model/vgg_16_epoch_54.pth')
-        model.module.fc.bias.data.copy_(temp['module.fc.bias'].data)
-        model.module.fc.weight.data.copy_(temp['module.fc.weight'].data)
-        '''
 
         # parallelize the model if using multiple gpus
         # if torch.cuda.device_count() > 1:
@@ -466,6 +384,7 @@ def main(args):
                 epoch=args.epoch, logger_name=logger_name,
                 checkpoint_folder=checkpoint_folder,
                 start_itr=start_itr, scheduler=scheduler)
+
     if args.dataset != 'inat':
         # do test
         test_loader = torch.utils.data.DataLoader(dset_test,
@@ -509,7 +428,7 @@ if __name__ == '__main__':
             help='cub | cars | aircrafts')
     parser.add_argument('--input_size', nargs='+', default=[448], type=int,
             help='input size as a list of sizes')
-    parser.add_argument('--model_names_list', nargs='+', default=['vgg'],
+    parser.add_argument('--model_names', default='vgg',
             type=str, help='input size as a list of sizes')
     parser.add_argument('--sketch', action='store_true',
             help='approximate tensor product in sketch space')

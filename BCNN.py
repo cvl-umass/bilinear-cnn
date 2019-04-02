@@ -64,7 +64,7 @@ def create_backbone(model_name, finetune_model=True, use_pretrained=True):
 
     else:
         # print("Invalid model name, exiting...")
-        logger.debug("Invalid mode name")
+        # logger.debug("Invalid mode name")
         exit()
 
     # return model_ft, input_size
@@ -298,7 +298,7 @@ class ApproxTensorProduct(Function):
             re_fi = fi.select(-1, 0)
             im_fi = fi.select(-1, 1)
 
-            temp_norm = re_fi**2 + im_fi**2
+            temp_norm = (re_fi**2 + im_fi**2 + 1e-8)
             temp_re = torch.addcmul(re_fout * re_fi, 1, im_fout, im_fi) \
                         / temp_norm
             temp_im = torch.addcmul(im_fout * re_fi, -1, re_fout, im_fi) \
@@ -312,7 +312,7 @@ class ApproxTensorProduct(Function):
                                         grad_im_prod, im_fi)
             grad_im = torch.addcmul(grad_im_prod * re_fi, -1,
                                         grad_re_prod, im_fi)
-            square_norm_fi = re_fi**2 + im_fi**2
+            square_norm_fi = re_fi**2 + im_fi**2 + 1e-8
             grad_re = grad_re / square_norm_fi
             grad_im = grad_im / square_norm_fi
             grad_re = torch.addcmul(grad_re * re_fout, -1,
@@ -320,6 +320,7 @@ class ApproxTensorProduct(Function):
             grad_im =torch.addcmul(grad_im * re_fout, 1,
                                     grad_re, im_fout)
             '''
+
             grad_fi = torch.irfft(
                     torch.stack((grad_re, grad_im), grad_re.dim()), 1,
                     signal_sizes=(ctx.embedding_dim,))
@@ -358,3 +359,4 @@ def create_bcnn_model(model_names_list, num_classes,
     return BCNNModule(num_classes, feature_extractors, 
                         pooling_fn, order, m_sqrt_iter=m_sqrt_iter,
                         demo_agg=demo_agg, fc_bottleneck=fc_bottleneck)
+
