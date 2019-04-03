@@ -78,7 +78,7 @@ def set_parameter_requires_grad(model, requires_grad):
 class BCNNModule(nn.Module):
     def __init__(self, num_classes, feature_extractors=None,
             pooling_fn=None, order=2, m_sqrt_iter=0, demo_agg=False,
-            fc_bottleneck=False):
+            fc_bottleneck=False, learn_proj=False):
         super(BCNNModule, self).__init__()
 
         assert feature_extractors is not None
@@ -105,6 +105,7 @@ class BCNNModule(nn.Module):
         # self.m_sqrt_iter = m_sqrt_iter
         self.demo_agg = demo_agg
         self.order = order
+        self.learn_proj = learn_proj
 
     def get_order(self):
         return self.order
@@ -145,13 +146,18 @@ class BCNNModule(nn.Module):
 # TODO: how to make sure the numbers of input x is equal to the number of feature extractors
 
 class MultiStreamsCNNExtractors(nn.Module):
-    def __init__(self, backbones_list):
+    def __init__(self, backbones_list, dim_list, proj_dim=0):
         super(MultiStreamsCNNExtractors, self).__init__()
         self.feature_extractors = nn.ModuleList(backbones_list)
+        if proj_dim > 0:
+            temp = [nn.Sequential(x, \
+                        nn.Conv2d(fe_dim, proj_dim, 1, 1, bias=False)) \
+                        for x, fe_dim in zip(self.feature_extractors, dim_list)]
+            self.feature_extractors = nn.ModuleList(temp)
 
 class BCNN_sharing(MultiStreamsCNNExtractors):
-    def __init__(self, backbones_list, order=2):
-        super(BCNN_sharing, self).__init__(backbones_list)
+    def __init__(self, backbones_list, dim_list, proj_dim=0, order=2):
+        super(BCNN_sharing, self).__init__(backbones_list, dim_list, proj_dim)
 
         # one backbone network for sharing parameters
         assert len(backbones_list) == 1 
@@ -176,8 +182,8 @@ class BCNN_sharing(MultiStreamsCNNExtractors):
             return y
 
 class BCNN_no_sharing(MultiStreamsCNNExtractors):
-    def __init__(self, backbones_list):
-        super(BCNN_no_sharing, self).__init__(backbones_list)
+    def __init__(self, backbones_list, dim_list, proj_dim=0):
+        super(BCNN_no_sharing, self).__init__(backbones_list, dim_list, proj_dim)
 
         # two networks for the model without sharing
         assert len(backbones_list) >= 2
@@ -226,7 +232,7 @@ class TensorProduct(nn.Module):
 
 
 class TensorSketch(nn.Module):
-    def __init__(self, dim_list, embedding_dim=4096):
+    def __init__(self, dim_list, embedding_dim=4096, pooling=True):
         super(TensorSketch, self).__init__()
 
         # assert len(dim_list) == order
@@ -237,6 +243,7 @@ class TensorSketch(nn.Module):
 
         self.count_sketch = nn.ModuleList(
                     [CountSketch(dim, embedding_dim) for dim in dim_list])
+        self.pooling = True
 
     def get_output_dim(self):
         return self.output_dim
@@ -245,15 +252,134 @@ class TensorSketch(nn.Module):
         # TODO: implement this
         # The count sketch implemnetation takes the inputs with 
         # the dimension of the channels at the end
-        y = [sketch_fn.forward(x.permute(0,2,3,1)) \
+
+        # y = [sketch_fn.forward(x.permute(0,2,3,1)) \
+        #         for x, sketch_fn in zip(args, self.count_sketch)] 
+        y = [sketch_fn(x.permute(0,2,3,1)) \
                 for x, sketch_fn in zip(args, self.count_sketch)] 
 
         z = ApproxTensorProduct.apply(self.output_dim, *y)
         _, h, w, _ = z.shape
 
-        return torch.squeeze(
-                torch.nn.functional.avg_pool2d(z.permute(0,3,1,2), (h, w)))
+        if self.pooling:
+            return torch.squeeze(
+                    torch.nn.functional.avg_pool2d(z.permute(0,3,1,2), (h, w)))
+        else:
+            return z.permute(0, 3, 1, 2)
         
+class SketchGammaDemocratic(nn.ModuleList):
+    def __init__(self, dim_list, embedding_dim=4096,
+                gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10):
+        super(SketchGammaDemocraticPooling, self).__init__()
+        self.sketch = TensorSketch(dim_list, embedding_dim, False)
+        output_dim = self.sketch.get_output_dim()
+        self.gamma_demo = GammaDemocratic(output_dim, gamma. sinkhorn_t, sinkhorn_iter)
+
+    def forward(self, *args):
+        x = self.sketch(*args) 
+        x = self.gamma(x)
+
+        return x
+
+    def get_output_dim(self):
+        return self.sketch.get_output_dim()
+
+class GammaDemocratic(nn.ModuleList):
+    def __init__(self, output_dim, gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10):
+        super(DemocraticPooling, self).__init__()
+        self.sinkhorn_t = sinkhorn_t    # dampening parameter
+        self.gamma = gamma
+        self.iter = sinkhorn_iter
+        # self.grad = {}
+        self.output_dim = output_dim 
+
+    '''
+    def save_grad(self, name):
+        def save(g):
+            self.grad[name] = g
+        return save
+    '''
+
+    def forward(self, x):
+        [bs, ch, h, w] = x.shape
+        x = x.view(bs, ch, -1).transpose(2, 1)
+        # x.register_hook(self.save_grad('x'))
+
+        K = x.bmm(x.transpose(2, 1))
+        K = (K + torch.abs(K)) / 2
+
+        # alpha = torch.autograd.Variable(torch.ones(bs, h*w, 1)).cuda()
+        alpha = torch.ones_like(x[:,:,0]) 
+        Ci = torch.sum(K, 2, keepdim=True)
+        Ci = torch.pow(Ci, self.gamma).detach()
+
+        for _ in range(self.sinkhorn_iter):
+            # alpha = torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) * \
+            #         torch.pow(Ci + 1e-10, self.sinkhorn_t) / \
+            #         (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
+            alpha = torch.pow(Ci + 1e-10, self.sinkhorn_t / 2) * \
+                    torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) / \
+                    (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
+        # alpha.register_hook(self.save_grad('alpha'))
+
+        x = torch.sum(x * alpha, dim=1, keepdim=False)
+
+        # x = torch.sqrt(x + 1e-8)
+        # x = torch.nn.functional.normalize(x)
+
+        return x
+
+    def get_output_dim(self):
+        return self.output_dim
+
+class SecondOrderGammaDemocratic(nn.Module):
+    def __init__(self, output_dim, gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10):
+        super(SecondOrderGammaDemocratic, self).__init__()
+        self.sinkhorn_t = sinkhorn_t    # dampening parameter
+        self.gamma = gamma
+        self.iter = sinkhorn_iter
+        # self.grad = {}
+        self.output_dim = output_dim
+
+    '''
+    def save_grad(self, name):
+        def save(g):
+            self.grad[name] = g
+        return save
+    '''
+
+    def forward(self, x):
+        [bs, ch, h, w] = x.shape
+        x = x.view(bs, ch, -1).transpose(2, 1)
+        # x.register_hook(self.save_grad('x'))
+
+        K = x.bmm(x.transpose(2, 1))
+        K = K * K;
+
+        # alpha = torch.autograd.Variable(torch.ones(bs, h*w, 1)).cuda()
+        alpha = torch.ones_like(x[:,:,0]) 
+        Ci = torch.sum(K, 2, keepdim=True)
+        Ci = torch.pow(Ci, self.gamma).detach()
+
+        for _ in range(self.sinkhorn_iter):
+            # alpha = torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) * \
+            #         torch.pow(Ci + 1e-10, self.sinkhorn_t) / \
+            #         (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
+            alpha = torch.pow(Ci + 1e-10, self.sinkhorn_t / 2) * \
+                    torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) / \
+                    (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
+        # alpha.register_hook(self.save_grad('alpha'))
+
+        x = x * torch.pow(alpha, 0.5)
+        x = x.transpose(1, 2).bmm(x).view(bs, -1)
+
+        # x = torch.sqrt(x + 1e-8)
+        # x = torch.nn.functional.normalize(x)
+
+        return x
+
+    def get_output_dim(self):
+        return self.output_dim
 
 class ApproxTensorProduct(Function):
 
@@ -329,9 +455,9 @@ class ApproxTensorProduct(Function):
         return (None, *grad)
 
 def create_bcnn_model(model_names_list, num_classes,
-                tensor_sketch=False, fine_tune=True, pre_train=True,
-                embedding_dim=8192, order=2, m_sqrt_iter=0, demo_agg=False,
-                fc_bottleneck=False):
+                pooling_method='outer_product', fine_tune=True, pre_train=True,
+                embedding_dim=8192, order=2, m_sqrt_iter=0,
+                fc_bottleneck=False, proj_dim=0):
 
     temp_list = [create_backbone(model_name, finetune_model=fine_tune, \
             use_pretrained=pre_train) for model_name in model_names_list]
@@ -346,17 +472,44 @@ def create_bcnn_model(model_names_list, num_classes,
     if len(backbones_list) == 1:
         assert order >= 2
         dim_list = dim_list * order
-        feature_extractors = BCNN_sharing(backbones_list, order)
+        feature_extractors = BCNN_sharing(backbones_list, dim_list,
+                                proj_dim, order)
     else:
-        feature_extractors = BCNN_no_sharing(backbones_list)
+        feature_extractors = BCNN_no_sharing(backbones_list, dim_list, proj_dim)
+
+    if proj_dim > 0:
+        dim_list = [proj_dim for x in dim_list]
+
+    if pooling_method == 'outer_product':
+        pooling_fn = TensorProduct(dim_list)
+    elif pooling_method == 'sketch':
+        pooling_fn = TensorSketch(dim_list, embedding_dim)
+    elif pooling_method == 'gamma_demo':
+        assert len(backbones_list) == 1
+        pooling_fn = SecondOrderGammaDemocratic(dim_list[0], gamma=0.5, sink_horn_t=0.5,
+                                                sinkhorn_iter=10)
+    elif pooling_method == 'skecth_gamm_demo':
+        assert len(backbones_list) == 1
+        pooling_fn = SketchGammaDemocratic(dim_list[0], embedding_dim, gamma=0.5,
+                                        sinkhorn_t=0.5, sinkhorn_iter=10)
+    else:
+        raise ValueError('Unknown pooling method: %s' % pooling_method)
+
+
+    '''
+    if gamma_demo:
+        # make sure the input to the SecondOrderGammaDemocratic satisfies len(input) == 1
+        assert len(backbone_list) == 1:
 
     if tensor_sketch:
         pooling_fn = TensorSketch(dim_list, embedding_dim)
     else:
         pooling_fn = TensorProduct(dim_list)
+    '''
 
     
+    learn_proj = True if proj_dim > 0 else False
     return BCNNModule(num_classes, feature_extractors, 
                         pooling_fn, order, m_sqrt_iter=m_sqrt_iter,
-                        demo_agg=demo_agg, fc_bottleneck=fc_bottleneck)
+                        fc_bottleneck=fc_bottleneck, learn_proj=learn_proj)
 

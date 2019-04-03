@@ -9,6 +9,8 @@ class ResNet(nn.Module):
         
         self.model = models.resnet101(pretrained=True)
         self.input_size = 224
+        delattr(self.model, 'fc')
+        delattr(self.model, 'avgpool')
 
     def forward(self, x):
         x = self.model.conv1(x)

@@ -35,11 +35,13 @@ def save_checkpoint(state, is_best, checkpoint_folder='exp',
         shutil.copyfile(filename, best_model_filename)
 
 # def initialize_optimizer(model_ft, lr, optimizer='sgd', finetune_model=True):
-def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=True):
+def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=True,
+        proj_lr=1e-3, proj_wd=1e-5):
     fc_params_to_update = []
     params_to_update = []
+    proj_params_to_update = []
     if finetune_model:
-        for name,param in model_ft.named_parameters():
+        for name, param in model_ft.named_parameters():
             # if name == 'module.fc.bias' or name == 'module.fc.weight':
             if 'module.fc' in name:
                 fc_params_to_update.append(param)
@@ -67,18 +69,29 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
     else:
-        for name,param in model_ft.named_parameters():
+        for name, param in model_ft.named_parameters():
             # if name == 'module.fc.bias' or name == 'module.fc.weight':
             if 'module.fc' in name:
                 param.requires_grad = True
                 fc_params_to_update.append(param)
             else:
-                param.requires_grad = False 
+                if model_ft.module.learn_proj and \
+                        'feature_extractors.0.1.weight' in name:
+                    param.requires_grad = True
+                    proj_params_to_update.append(param)
+                else:
+                    param.requires_grad = False 
 
         # Observe that all parameters are being optimized
         if optimizer == 'sgd':
-            optimizer_ft = optim.SGD(fc_params_to_update, lr=lr, momentum=0.9, 
-                                weight_decay=wd)
+            if len(proj_params_to_update) == 0:
+                optimizer_ft = optim.SGD(fc_params_to_update, lr=lr, momentum=0.9, 
+                                    weight_decay=wd)
+            else:
+                optimizer_ft = optim.SGD([
+                    {'params': fc_params_to_update},
+                    {'params': proj_params_to_update, 'weight_decay': proj_wd, 'lr': proj_lr}],
+                    lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam(fc_params_to_update, lr=lr, weight_decay=wd)
         else:
@@ -107,6 +120,7 @@ def train_model(model, dset_loader, criterion,
     running_loss = 0.0; running_num_data = 0 
     running_corrects = 0
     val_loss_history = []; best_acc = 0.0 
+    val_loss = 0.0; val_acc = 0.0
     # best_model_wts = copy.deepcopy(model.state_dict())
 
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
@@ -161,9 +175,6 @@ def train_model(model, dset_loader, criterion,
                 optimizer.zero_grad()
 
         epoch = ((itr + 1) *  bs) // len(dset_loader['train'].dataset)
-        if epoch > last_epoch and scheduler is not None:
-            last_epoch = epoch
-            scheduler.step()
 
         running_num_data += inputs[0].size(0) 
         running_loss += loss.item() * inputs[0].size(0)
@@ -206,6 +217,19 @@ def train_model(model, dset_loader, criterion,
             plot_log(logger_filename,
                     logger_filename.replace('history.txt', 'curve.png'), True)
 
+            model.train()
+        # update scheduler
+        if scheduler is not None:
+            if isinstance(scheduler, \
+                    torch.optim.lr_scheduler.ReduceLROnPlateau) and \
+                    (itr + 1) % val_frequency == 0:
+                scheduler.step(val_acc)
+            else:
+                if epoch > last_epoch and scheduler is not None:
+                    last_epoch = epoch
+                    scheduler.step()
+        # checkpoint
+        if (itr + 1) & val_frequency == 0 or itr == maxItr - 1:
             is_best = val_acc > best_acc
             if is_best:
                 best_acc = val_acc
@@ -221,8 +245,6 @@ def train_model(model, dset_loader, criterion,
                 checkpoint_dict['scheduler'] = scheduler.state_dict()
             save_checkpoint(checkpoint_dict,
                     is_best, checkpoint_folder=checkpoint_folder)
-            model.train()
-
 
     time_elapsed = time.time() - since
     logger.info('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -252,7 +274,7 @@ def main(args):
     order = 2
     embedding = args.embedding_dim
     model_names_list = args.model_names_list
-    tensor_sketch = args.sketch 
+    
 
     args.exp_dir = os.path.join(args.dataset, args.exp_dir)
 
@@ -370,9 +392,9 @@ def main(args):
     # The argument order is used only when the model parameters are shared
     # between feature extractors
     model = create_bcnn_model(model_names_list, len(dset['train'].classes), 
-                    tensor_sketch, fine_tune, pre_train, embedding, order,
-                    m_sqrt_iter=args.matrix_sqrt_iter, demo_agg=args.demo_agg,
-                    fc_bottleneck=args.fc_bottleneck)
+                    args.pooling_method, fine_tune, pre_train, embedding, order,
+                    m_sqrt_iter=args.matrix_sqrt_iter,
+                    fc_bottleneck=args.fc_bottleneck, proj_dim=args.proj_dim)
     model = model.to(device)
     model = torch.nn.DataParallel(model)
 
@@ -384,7 +406,7 @@ def main(args):
                                         'checkpoint.pth.tar')
     start_itr = 0
     optim_fc = initialize_optimizer(model, args.init_lr, optimizer='sgd', wd=args.init_wd,
-                                finetune_model=False)
+                                finetune_model=False, proj_lr=args.proj_lr, proj_wd=args.proj_wd)
     logger_name = 'train_init_logger'
     logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_init_history.txt'), logger_name)
@@ -429,8 +451,12 @@ def main(args):
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
                                     wd=args.wd, finetune_model=fine_tune)
 
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
-                            lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
+        if  args.dataset != 'inat':
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
+                                lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
+        else:
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'max')
+
         logger_name = 'train_logger'
         logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_history.txt'), logger_name)
@@ -511,17 +537,22 @@ if __name__ == '__main__':
             help='input size as a list of sizes')
     parser.add_argument('--model_names_list', nargs='+', default=['vgg'],
             type=str, help='input size as a list of sizes')
-    parser.add_argument('--sketch', action='store_true',
-            help='approximate tensor product in sketch space')
+    parser.add_argument('--pooling_method', default='outer_product', type=str,
+            help='outer_product | sketch | gamma_demo | sketch_gamma_demo')
     parser.add_argument('--embedding_dim', type=int, default=8192,
             help='the dimension for the tnesor sketch approximation')
     parser.add_argument('--matrix_sqrt_iter', type=int, default=0,
             help='number of iteration for the Newtons Method approximating' + \
                     'matirx square rooti. Default=0 [no matrix square root]')
-    parser.add_argument('--demo_agg', action='store_true',
-            help='normalization with democratic aggregation')
     parser.add_argument('--fc_bottleneck', action='store_true',
             help='add bottelneck to the fc layers')
+    parser.add_argument('--proj_dim', type=int, default=0,
+            help='project the dimension of cnn features to lower ' + \
+                    'dimensionality before computing tensor product')
+    parser.add_argument('--proj_lr', default=1e-3, type=float,
+            help='learning rate')
+    parser.add_argument('--proj_wd', default=1e-5, type=float,
+            help='weight decay')
     args = parser.parse_args()
 
     main(args)

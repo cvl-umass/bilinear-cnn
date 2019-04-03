@@ -164,9 +164,6 @@ def train_model(model, dset_loader, criterion,
                 optimizer.zero_grad()
 
         epoch = ((itr + 1) *  bs) // len(dset_loader['train'].dataset)
-        if epoch > last_epoch and scheduler is not None:
-            last_epoch = epoch
-            scheduler.step()
 
         '''
         running_num_data += inputs[0].size(0) 
@@ -217,6 +214,20 @@ def train_model(model, dset_loader, criterion,
             plot_log(logger_filename,
                     logger_filename.replace('history.txt', 'curve.png'), True)
 
+            model.train()
+
+        # update scheduler
+        if scheduler is not None:
+            if isinstance(scheduler, \
+                    torch.optim.lr_scheduler.ReduceLROnPlateau) and \
+                    (itr + 1) % val_frequency == 0:
+                scheduler.step(val_acc)
+            else:
+                if epoch > last_epoch and scheduler is not None:
+                    last_epoch = epoch
+                    scheduler.step()
+        # checkpoint
+        if (itr + 1) & val_frequency == 0 or itr == maxItr - 1:
             is_best = val_acc > best_acc
             if is_best:
                 best_acc = val_acc
@@ -232,7 +243,6 @@ def train_model(model, dset_loader, criterion,
                 checkpoint_dict['scheduler'] = scheduler.state_dict()
             save_checkpoint(checkpoint_dict,
                     is_best, checkpoint_folder=checkpoint_folder)
-            model.train()
 
 
     time_elapsed = time.time() - since
@@ -352,8 +362,11 @@ def main(args):
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
                                     wd=args.wd, finetune_model=fine_tune)
 
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
-                            lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
+        if  args.dataset != 'inat':
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
+                                lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
+        else:
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'max')
         logger_name = 'train_logger'
         logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_history.txt'), logger_name)
