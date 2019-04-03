@@ -235,15 +235,13 @@ class TensorSketch(nn.Module):
     def __init__(self, dim_list, embedding_dim=4096, pooling=True):
         super(TensorSketch, self).__init__()
 
-        # assert len(dim_list) == order
 
         self.output_dim = embedding_dim 
-        self.order = len(dim_list)
-        # self.order = order
+        # self.order = len(dim_list)
 
         self.count_sketch = nn.ModuleList(
                     [CountSketch(dim, embedding_dim) for dim in dim_list])
-        self.pooling = True
+        self.pooling = pooling 
 
     def get_output_dim(self):
         return self.output_dim
@@ -270,14 +268,14 @@ class TensorSketch(nn.Module):
 class SketchGammaDemocratic(nn.ModuleList):
     def __init__(self, dim_list, embedding_dim=4096,
                 gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10):
-        super(SketchGammaDemocraticPooling, self).__init__()
+        super(SketchGammaDemocratic, self).__init__()
         self.sketch = TensorSketch(dim_list, embedding_dim, False)
         output_dim = self.sketch.get_output_dim()
-        self.gamma_demo = GammaDemocratic(output_dim, gamma. sinkhorn_t, sinkhorn_iter)
+        self.gamma_demo = GammaDemocratic(output_dim, gamma, sinkhorn_t, sinkhorn_iter)
 
     def forward(self, *args):
         x = self.sketch(*args) 
-        x = self.gamma(x)
+        x = self.gamma_demo(x)
 
         return x
 
@@ -286,10 +284,10 @@ class SketchGammaDemocratic(nn.ModuleList):
 
 class GammaDemocratic(nn.ModuleList):
     def __init__(self, output_dim, gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10):
-        super(DemocraticPooling, self).__init__()
+        super(GammaDemocratic, self).__init__()
         self.sinkhorn_t = sinkhorn_t    # dampening parameter
         self.gamma = gamma
-        self.iter = sinkhorn_iter
+        self.sinkhorn_iter = sinkhorn_iter
         # self.grad = {}
         self.output_dim = output_dim 
 
@@ -309,7 +307,7 @@ class GammaDemocratic(nn.ModuleList):
         K = (K + torch.abs(K)) / 2
 
         # alpha = torch.autograd.Variable(torch.ones(bs, h*w, 1)).cuda()
-        alpha = torch.ones_like(x[:,:,0]) 
+        alpha = torch.ones_like(x[:,:,[0]]) 
         Ci = torch.sum(K, 2, keepdim=True)
         Ci = torch.pow(Ci, self.gamma).detach()
 
@@ -336,6 +334,7 @@ class SecondOrderGammaDemocratic(nn.Module):
     def __init__(self, output_dim, gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10):
         super(SecondOrderGammaDemocratic, self).__init__()
         self.sinkhorn_t = sinkhorn_t    # dampening parameter
+        self.sinkhorn_iter = sinkhorn_iter
         self.gamma = gamma
         self.iter = sinkhorn_iter
         # self.grad = {}
@@ -348,7 +347,11 @@ class SecondOrderGammaDemocratic(nn.Module):
         return save
     '''
 
-    def forward(self, x):
+    def forward(self, *args):
+        # The forward assume args[0] == args[1]. This should be asserted during
+        # model creation
+
+        x = args[0]
         [bs, ch, h, w] = x.shape
         x = x.view(bs, ch, -1).transpose(2, 1)
         # x.register_hook(self.save_grad('x'))
@@ -357,7 +360,7 @@ class SecondOrderGammaDemocratic(nn.Module):
         K = K * K;
 
         # alpha = torch.autograd.Variable(torch.ones(bs, h*w, 1)).cuda()
-        alpha = torch.ones_like(x[:,:,0]) 
+        alpha = torch.ones_like(x[:,:,[0]]) 
         Ci = torch.sum(K, 2, keepdim=True)
         Ci = torch.pow(Ci, self.gamma).detach()
 
@@ -485,12 +488,12 @@ def create_bcnn_model(model_names_list, num_classes,
     elif pooling_method == 'sketch':
         pooling_fn = TensorSketch(dim_list, embedding_dim)
     elif pooling_method == 'gamma_demo':
-        assert len(backbones_list) == 1
-        pooling_fn = SecondOrderGammaDemocratic(dim_list[0], gamma=0.5, sink_horn_t=0.5,
+        assert isinstance(feature_extractors, BCNN_sharing) 
+        pooling_fn = SecondOrderGammaDemocratic(dim_list[0] ** 2, gamma=0.5, sinkhorn_t=0.5,
                                                 sinkhorn_iter=10)
-    elif pooling_method == 'skecth_gamm_demo':
-        assert len(backbones_list) == 1
-        pooling_fn = SketchGammaDemocratic(dim_list[0], embedding_dim, gamma=0.5,
+    elif pooling_method == 'sketch_gamma_demo':
+        # assert len(backbones_list) == 1
+        pooling_fn = SketchGammaDemocratic(dim_list, embedding_dim, gamma=0.5,
                                         sinkhorn_t=0.5, sinkhorn_iter=10)
     else:
         raise ValueError('Unknown pooling method: %s' % pooling_method)
