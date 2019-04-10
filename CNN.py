@@ -3,11 +3,17 @@ import torch
 import torch.nn as nn
 
 class ResNet(nn.Module):
-    def __init__(self):
+    def __init__(self, input_size):
         super(ResNet, self).__init__()
         
         self.model = models.resnet101(pretrained=True)
-        self.input_size = 224
+        self.input_size = input_size
+        '''
+        if input_size == 448:
+            kernel_size = 2 * self.model.avgpool.kernel_size
+            self.model.avgpool = nn.AvgPool2d(kernel_size) 
+        '''
+        self.model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.output_dim = 2048
         delattr(self.model, 'fc')
 
@@ -135,11 +141,14 @@ class CNN_Model(nn.Module):
         
         return y 
 
-def create_cnn_model(model_name, num_classes, fine_tune=True, pre_train=True):
+def create_cnn_model(model_name, num_classes, input_size=224,
+                    fine_tune=True, pre_train=True):
+    if input_size != 224:
+        assert model_name == 'resnet' 
     if model_name == 'vgg':
         feature_extractors = VGG()
     elif model_name == 'resnet':
-        feature_extractors = ResNet()
+        feature_extractors = ResNet(input_size)
     elif model_name == 'densenet':
         feature_extractors = DenseNet()
     else:

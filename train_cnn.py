@@ -108,6 +108,7 @@ def train_model(model, dset_loader, criterion,
     running_loss = 0.0; running_num_data = 0 
     running_corrects = 0
     val_loss_history = []; best_acc = 0.0 
+    val_acc = 0.0
     # best_model_wts = copy.deepcopy(model.state_dict())
 
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
@@ -347,8 +348,8 @@ def main(args):
     # The argument embedding is used only when tensor_sketch is True
     # The argument order is used only when the model parameters are shared
     # between feature extractors
-    model = create_cnn_model(model_names, len(dset['train'].classes), 
-                    fine_tune, pre_train)
+    model = create_cnn_model(model_names, len(dset['train'].classes),
+                    input_size[0], fine_tune, pre_train)
     model = model.to(device)
     model = torch.nn.DataParallel(model)
 
