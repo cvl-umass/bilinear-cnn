@@ -37,14 +37,15 @@ def wait_dataset_copy_finish(dataset):
         time.sleep(600)
 
 
-def gypsum_setup_dataset(dataset):
-    if not os.path.isdir(dset_root[dataset]):
-        if os.path.isdir(os.path.join(dset_root[dataset] + '_flag')):
-            wait_dataset_copy_finish(dataset)
+def setup_dataset(dataset):
+    if 'node' in socket.gethostname():
+        if not os.path.isdir(dset_root[dataset]):
+            if os.path.isdir(os.path.join(dset_root[dataset] + '_flag')):
+                wait_dataset_copy_finish(dataset)
+            else:
+                gypsum_copy_data_to_local(dataset)
         else:
-            gypsum_copy_data_to_local(dataset)
-    else:
-        wait_dataset_copy_finish(dataset)
+            wait_dataset_copy_finish(dataset)
 
 
 def gypsum_copy_data_to_local(dataset):

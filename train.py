@@ -5,7 +5,7 @@ import numpy as np
 import torchvision
 from torchvision import datasets, models, transforms
 import os
-from config import dset_root
+from config import dset_root, setup_dataset
 import random
 import argparse
 import copy
@@ -16,7 +16,7 @@ import shutil
 from BCNN import create_bcnn_model
 from test import test_model
 from plot_curve import plot_log
-import gc
+import json
 
 def initializeLogging(log_filename, logger_name):
     log = logging.getLogger(logger_name)
@@ -308,10 +308,13 @@ def main(args):
     if not os.path.isdir(init_checkpoint_folder):
         os.makedirs(init_checkpoint_folder)
 
+    # log the setup for the experiments
     args_dict = vars(args)
-    import json
     with open(os.path.join(exp_root, args.exp_dir, 'args.txt'), 'a') as f:
         f.write(json.dumps(args_dict, sort_keys=True, indent=4))
+
+    # make sure the dataset is ready
+    setup_dataset(args.dataset)
 
     # ==================  Craete data loader ==================================
     data_transforms = {
