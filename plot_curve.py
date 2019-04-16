@@ -34,8 +34,8 @@ def plot_acc(log_name):
             loss = float(m.groups()[0])
             acc = float(m.groups()[1])
 
-            data[iteration][(i-1)*2] += loss
-            data[iteration][(i-1)*2 +1] += acc
+            data[iteration][(i-1)*2] = loss
+            data[iteration][(i-1)*2 +1] = acc
 
     
     train_acc = []
@@ -64,6 +64,14 @@ def plot_acc(log_name):
     plt.xticks(np.arange(0, iter_list[-1], iter_list[-1]//10))
     plt.yticks(np.arange(0.1, 1, 0.05))
     plt.xlim([0, iter_list[-1]])
+    min_y = min([min(train_acc), min(val_acc)]) - 0.05
+    max_y = max([max(train_acc), max(val_acc)]) + 0.05
+    if max_y - min_y < 0.1:
+        min_y = max(0, min_y - 0.05)
+        max_y = min(1, max_y + 0.05)
+    plt.ylim(min_y, max_y)
+
+
     # plt.ylim([min([min(train_acc), min(val_acc)]),
     #             max([max(train_acc), max(val_acc)])])
     plt.grid(True)
@@ -99,8 +107,8 @@ def plot_log(log_path, save_path, close_fig=True):
     return max_acc
 
 def main(args):
-    _ = plot_log(os.path.join('augmentation_exp', args.exp_dir, args.logs),
-            os.path.join('augmentation_exp', args.exp_dir, args.output_filename))
+    _ = plot_log(os.path.join('../exp', args.exp_dir, args.logs),
+            os.path.join('../exp', args.exp_dir, args.output_filename))
 
 
 if __name__ == '__main__':
@@ -108,7 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--logs', type=str, default='train_history.txt')
     parser.add_argument('--exp_dir', type=str, default='exp')
     parser.add_argument('--output_filename', type=str,
-            default='training_curve.png')
+            default='train_curve.png')
 
     args = parser.parse_args()
     main(args)
