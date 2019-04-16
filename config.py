@@ -38,6 +38,10 @@ def wait_dataset_copy_finish(dataset):
 
 
 def setup_dataset(dataset):
+    my_tmp = os.path.join(os.getenv("HOME"), 'tmp')
+    if not os.path.isdir(my_tmp):
+        os.makedirs(my_tmp)
+        os.environ["TMPDIR"] = my_tmp
     if 'node' in socket.gethostname():
         if not os.path.isdir(dset_root[dataset]):
             if os.path.isdir(os.path.join(dset_root[dataset] + '_flag')):
