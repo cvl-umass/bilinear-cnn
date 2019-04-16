@@ -16,7 +16,7 @@ import shutil
 from CNN import create_cnn_model
 from test import test_model
 from plot_curve import plot_log
-import gc
+import json
 
 def initializeLogging(log_filename, logger_name):
     log = logging.getLogger(logger_name)
@@ -285,7 +285,7 @@ def main(args):
     else:
         crop_from_size = input_size
         
-    if args.dataset in ['inat']:
+    if 'inat' in args.dataset:
         split = {'train': 'train', 'val': 'val'}
     else:
         split = {'train': 'train_val', 'val': 'test'}
@@ -300,9 +300,11 @@ def main(args):
         os.makedirs(checkpoint_folder)
 
     args_dict = vars(args)
-    import json
     with open(os.path.join(exp_root, args.exp_dir, 'args.txt'), 'a') as f:
         f.write(json.dumps(args_dict, sort_keys=True, indent=4))
+
+    # make sure the dataset is ready
+    setup_dataset(args.dataset)
 
     # ==================  Craete data loader ==================================
     data_transforms = {
@@ -327,15 +329,26 @@ def main(args):
         from CarsDataset import CarsDataset as dataset
     elif args.dataset == 'aircrafts':
         from AircraftsDataset import AircraftsDataset as dataset
-    elif args.dataset == 'inat':
+    elif 'inat' in args.dataset:
         from iNatDataset import iNatDataset as dataset
+        if args.dataset == 'inat':
+            subset = None
+        else:
+            subset = args.dataset[len('inat_'):]
+            subset = subset[0].upper() + subset[1:]
     else:
         raise ValueError('Unknown dataset: %s' % task)
 
-    dset = {x: dataset(dset_root[args.dataset], split[x], 
-                    transform=data_transforms[x]) for x in ['train', 'val']}
-    dset_test = dataset(dset_root[args.dataset], 'test', 
-                    transform=data_transforms['val']) 
+    if 'inat' in args.dataset:
+        dset = {x: dataset(dset_root['inat'], split[x], subset, \
+                        transform=data_transforms[x]) for x in ['train', 'val']}
+        dset_test = dataset(dset_root['inat'], 'test', subset, \
+                        transform=data_transforms['val']) 
+    else:
+        dset = {x: dataset(dset_root[args.dataset], split[x], 
+                        transform=data_transforms[x]) for x in ['train', 'val']}
+        dset_test = dataset(dset_root[args.dataset], 'test', 
+                        transform=data_transforms['val']) 
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
                 batch_size=args.batch_size, shuffle=True, num_workers=8,
@@ -363,7 +376,7 @@ def main(args):
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
                                     wd=args.wd, finetune_model=fine_tune)
 
-        if  args.dataset != 'inat':
+        if 'inat' not in args.dataset:
             scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
                                 lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
         else:
@@ -399,7 +412,7 @@ def main(args):
                 checkpoint_folder=checkpoint_folder,
                 start_itr=start_itr, scheduler=scheduler)
 
-    if args.dataset != 'inat':
+    if 'inat' not in args.dataset:
         # do test
         test_loader = torch.utils.data.DataLoader(dset_test,
                             batch_size=args.batch_size, shuffle=False,
