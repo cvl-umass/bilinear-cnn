@@ -34,7 +34,7 @@ def wait_dataset_copy_finish(dataset):
             status = f.readline()
         if status == 'True':
             break
-        time.sleep(20)
+        time.sleep(600)
 
 
 def gypsum_setup_dataset(dataset):
