@@ -232,7 +232,8 @@ class TensorProduct(nn.Module):
 
 
 class TensorSketch(nn.Module):
-    def __init__(self, dim_list, embedding_dim=4096, pooling=True):
+    def __init__(self, dim_list, embedding_dim=4096, pooling=True,
+                    update_sketch=False):
         super(TensorSketch, self).__init__()
 
 
@@ -240,7 +241,8 @@ class TensorSketch(nn.Module):
         # self.order = len(dim_list)
 
         self.count_sketch = nn.ModuleList(
-                    [CountSketch(dim, embedding_dim) for dim in dim_list])
+                    [CountSketch(dim, embedding_dim, update_proj=update_sketch) \
+                            for dim in dim_list])
         self.pooling = pooling 
 
     def get_output_dim(self):
@@ -267,9 +269,9 @@ class TensorSketch(nn.Module):
         
 class SketchGammaDemocratic(nn.ModuleList):
     def __init__(self, dim_list, embedding_dim=4096,
-                gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10):
+                gamma=0, sinkhorn_t=0.5, sinkhorn_iter=10, update_sketch=False):
         super(SketchGammaDemocratic, self).__init__()
-        self.sketch = TensorSketch(dim_list, embedding_dim, False)
+        self.sketch = TensorSketch(dim_list, embedding_dim, False, update_sketch)
         output_dim = self.sketch.get_output_dim()
         self.gamma_demo = GammaDemocratic(output_dim, gamma, sinkhorn_t, sinkhorn_iter)
 
@@ -315,15 +317,12 @@ class GammaDemocratic(nn.ModuleList):
             # alpha = torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) * \
             #         torch.pow(Ci + 1e-10, self.sinkhorn_t) / \
             #         (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
-            alpha = torch.pow(Ci + 1e-10, self.sinkhorn_t / 2) * \
+            alpha = torch.pow(Ci + 1e-10, self.sinkhorn_t) * \
                     torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) / \
                     (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
         # alpha.register_hook(self.save_grad('alpha'))
 
         x = torch.sum(x * alpha, dim=1, keepdim=False)
-
-        # x = torch.sqrt(x + 1e-8)
-        # x = torch.nn.functional.normalize(x)
 
         return x
 
@@ -368,21 +367,74 @@ class SecondOrderGammaDemocratic(nn.Module):
             # alpha = torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) * \
             #         torch.pow(Ci + 1e-10, self.sinkhorn_t) / \
             #         (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
-            alpha = torch.pow(Ci + 1e-10, self.sinkhorn_t / 2) * \
+            alpha = torch.pow(Ci + 1e-10, self.sinkhorn_t) * \
                     torch.pow(alpha + 1e-10, 1-self.sinkhorn_t) / \
                     (torch.pow(K.bmm(alpha) + 1e-10, self.sinkhorn_t) + 1e-10)
         # alpha.register_hook(self.save_grad('alpha'))
 
-        x = x * torch.pow(alpha, 0.5)
+        x = x * torch.pow(alpha + 1e-8, 0.5)
         x = x.transpose(1, 2).bmm(x).view(bs, -1)
-
-        # x = torch.sqrt(x + 1e-8)
-        # x = torch.nn.functional.normalize(x)
 
         return x
 
     def get_output_dim(self):
         return self.output_dim
+
+'''
+class O2dpFunction(Function):
+    @staticmethod
+    def forward(ctx, x, K, gamma, tau):
+        # x: input features
+        # K: kernel of second-order featrues
+        alpha = torch.ones_like(x[:,:,[0]]) 
+        Ci = torch.sum(K, 2, keepdim=True)
+        Ci = torch.pow(Ci, self.gamma)
+
+        for _ in range(self.sinkhorn_iter):
+            alpha = torch.pow(Ci, self.sinkhorn_t) * \
+                    torch.pow(alpha, 1-self.sinkhorn_t) / \
+                    (torch.pow(K.bmm(alpha), self.sinkhorn_t) + 1e-10)
+        # alpha = alpha / (torch.sum(alpha, 1, keepdim=True) + 1e-5)
+        y = x * torch.pow(alpha, 0.5)
+        y = y.transpose(1, 2).bmm(y).view(bs, -1)
+        ctx.save_for_backward(x, alpha, K, gamma)
+
+        return y 
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x = ctx.saved_tensors[0]
+        alpha = ctx.saved_tensors[1]
+        K = ctx.saved_tensors[2]
+
+        dfda = K.bmm(torch.diag_embed(alpha))
+        dfda = torch.diag_embed(torch.sum(dfda, 2, keepdim=True)) + dfda
+        inv_dfda = torch.inverse(dfda)
+
+        S = torch.sqrt(K) 
+        aiak = alpha.bmm(alpha.transpose(2, 1))
+        M =  aiak * S
+
+        # common_term = gamma * torch.pow(torch.sum(K, 2, keepdim=True), gamma-1)
+        W = gamma * torch.pow(torch.sum(K, 2, keepdim=True), gamma-1)
+        dadx = []
+        for k in range(x.shape[1]):
+            dfdx_k = (M[:,:,k] - W * S[:,:,k]) * x[:,:,k]
+            dfdx_k = \
+                    2 * torch.sum(M.unsqueeze(3) * x.unsqueeze(2),
+                                    2, keepdim=False) - \
+                    W * (2 * torch.sum(S.unsqueeze(3) * x.unsqueeze(2),
+                                    2, keepdim=False))
+            dadx_k = inv_dfda.bmm(dfdx_k)
+            #TODO: is it possible to reduce this to dLdx_k?
+            dadx.append(dadx_k)
+        # TODO: this might be a huge matrix
+        dadx = torch.cat(dadx, 2)
+
+        return _, None, None, None
+'''
+
+        
 
 class ApproxTensorProduct(Function):
 
@@ -436,20 +488,6 @@ class ApproxTensorProduct(Function):
                             temp_im, grad_im_prod)
             grad_im = torch.addcmul(grad_im_prod * temp_re, -1,
                             grad_re_prod, temp_im)
-            '''
-            grad_re = torch.addcmul(grad_re_prod * re_fi,  1,
-                                        grad_im_prod, im_fi)
-            grad_im = torch.addcmul(grad_im_prod * re_fi, -1,
-                                        grad_re_prod, im_fi)
-            square_norm_fi = re_fi**2 + im_fi**2 + 1e-8
-            grad_re = grad_re / square_norm_fi
-            grad_im = grad_im / square_norm_fi
-            grad_re = torch.addcmul(grad_re * re_fout, -1,
-                                    grad_im, im_fout)
-            grad_im =torch.addcmul(grad_im * re_fout, 1,
-                                    grad_re, im_fout)
-            '''
-
             grad_fi = torch.irfft(
                     torch.stack((grad_re, grad_im), grad_re.dim()), 1,
                     signal_sizes=(ctx.embedding_dim,))
@@ -460,7 +498,8 @@ class ApproxTensorProduct(Function):
 def create_bcnn_model(model_names_list, num_classes,
                 pooling_method='outer_product', fine_tune=True, pre_train=True,
                 embedding_dim=8192, order=2, m_sqrt_iter=0,
-                fc_bottleneck=False, proj_dim=0):
+                fc_bottleneck=False, proj_dim=0, update_sketch=False,
+                gamma=0.5):
 
     temp_list = [create_backbone(model_name, finetune_model=fine_tune, \
             use_pretrained=pre_train) for model_name in model_names_list]
@@ -486,15 +525,16 @@ def create_bcnn_model(model_names_list, num_classes,
     if pooling_method == 'outer_product':
         pooling_fn = TensorProduct(dim_list)
     elif pooling_method == 'sketch':
-        pooling_fn = TensorSketch(dim_list, embedding_dim)
+        pooling_fn = TensorSketch(dim_list, embedding_dim, True, update_sketch)
     elif pooling_method == 'gamma_demo':
         assert isinstance(feature_extractors, BCNN_sharing) 
-        pooling_fn = SecondOrderGammaDemocratic(dim_list[0] ** 2, gamma=0.5, sinkhorn_t=0.5,
+        pooling_fn = SecondOrderGammaDemocratic(dim_list[0] ** 2, gamma=gamma, sinkhorn_t=0.5,
                                                 sinkhorn_iter=10)
     elif pooling_method == 'sketch_gamma_demo':
         # assert len(backbones_list) == 1
-        pooling_fn = SketchGammaDemocratic(dim_list, embedding_dim, gamma=0.5,
-                                        sinkhorn_t=0.5, sinkhorn_iter=10)
+        pooling_fn = SketchGammaDemocratic(dim_list, embedding_dim, gamma=gamma,
+                                        sinkhorn_t=0.5, sinkhorn_iter=10,
+                                        update_sketch=update_sketch)
     else:
         raise ValueError('Unknown pooling method: %s' % pooling_method)
 

@@ -394,7 +394,8 @@ def main(args):
     model = create_bcnn_model(model_names_list, len(dset['train'].classes), 
                     args.pooling_method, fine_tune, pre_train, embedding, order,
                     m_sqrt_iter=args.matrix_sqrt_iter,
-                    fc_bottleneck=args.fc_bottleneck, proj_dim=args.proj_dim)
+                    fc_bottleneck=args.fc_bottleneck, proj_dim=args.proj_dim,
+                    update_sketch=args.update_sketch, gamma=args.gamma)
     model = model.to(device)
     model = torch.nn.DataParallel(model)
 
@@ -511,13 +512,13 @@ if __name__ == '__main__':
             help='size of mini-batch that can fit into gpus (sub bacth size')
     parser.add_argument('--epoch', default=45, type=int,
             help='number of epochs')
-    parser.add_argument('--init_epoch', default=55, type=int,
+    parser.add_argument('--init_epoch', default=25, type=int,
             help='number of epochs for initializing fc layer')
     # parser.add_argument('--iteration', default=20000, type=int,
     #         help='number of iterations')
     parser.add_argument('--init_lr', default=1.0, type=float,
             help='learning rate')
-    parser.add_argument('--lr', default=1e-2, type=float,
+    parser.add_argument('--lr', default=1e-3, type=float,
             help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float,
             help='weight decay')
@@ -553,6 +554,10 @@ if __name__ == '__main__':
             help='learning rate')
     parser.add_argument('--proj_wd', default=1e-5, type=float,
             help='weight decay')
+    parser.add_argument('--update_sketch', action='store_true',
+            help='add bottelneck to the fc layers')
+    parser.add_argument('--gamma', default=0.5, type=float,
+            help='the value of gamma for gamma democratic aggregation')
     args = parser.parse_args()
 
     main(args)

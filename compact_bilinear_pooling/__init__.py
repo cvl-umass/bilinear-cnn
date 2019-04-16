@@ -27,7 +27,7 @@ def CountSketchFn_forward(h, s, output_size, x, force_cpu_scatter_add=False):
         return out.scatter_add_(-1, h, xs)
 
 
-def CountSketchFn_backward(h, s, x_size, grad_output):
+def CountSketchFn_backward(h, s, x, x_size, grad_output):
     s_view = (1,) * (len(x_size)-1) + (x_size[-1],)
 
     s = s.view(s_view)
@@ -35,7 +35,9 @@ def CountSketchFn_backward(h, s, x_size, grad_output):
 
     grad_x = grad_output.gather(-1, h)
     grad_x = grad_x * s
-    return grad_x
+
+    grad_s = torch.sum(grad_output.gather(-1, h) * x, dim=(0,1,2))
+    return grad_x, grad_s
 
 class CountSketchFn(Function):
 
@@ -43,7 +45,7 @@ class CountSketchFn(Function):
     def forward(ctx, h, s, output_size, x, force_cpu_scatter_add=False):
         x_size = tuple(x.size())
 
-        ctx.save_for_backward(h,s)
+        ctx.save_for_backward(h, s, x)
         ctx.x_size = tuple(x.size())
 
         return CountSketchFn_forward(h, s, output_size, x, force_cpu_scatter_add)
@@ -51,10 +53,10 @@ class CountSketchFn(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        h,s = ctx.saved_variables
+        h, s, x = ctx.saved_variables
 
-        grad_x = CountSketchFn_backward(h,s,ctx.x_size,grad_output)
-        return None, None, None, grad_x
+        grad_x, grad_s = CountSketchFn_backward(h, s, x, ctx.x_size,grad_output)
+        return None, grad_s, None, grad_x
 
 class CountSketch(nn.Module):
     r"""Compute the count sketch over an input signal.
@@ -82,7 +84,7 @@ class CountSketch(nn.Module):
         Akira Fukui et al. "Multimodal Compact Bilinear Pooling for Visual Question Answering and Visual Grounding", arXiv:1606.01847 (2016).
     """
 
-    def __init__(self, input_size, output_size, h = None, s = None):
+    def __init__(self, input_size, output_size, h=None, s=None, update_proj=False):
         super(CountSketch, self).__init__()
 
         self.input_size = input_size
@@ -103,8 +105,12 @@ class CountSketch(nn.Module):
         h.float = types.MethodType(identity,h)
         h.double = types.MethodType(identity,h)
 
-        self.register_buffer('h',h)
-        self.register_buffer('s',s)
+        self.register_buffer('h', h)
+        if not update_proj:
+            self.register_buffer('s', s)
+        else:
+            # self.register_parameter('s', s)
+            self.s = nn.Parameter(s)
 
     def forward(self, x):
         x_size = list(x.size())
