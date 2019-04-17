@@ -5,7 +5,7 @@ import numpy as np
 import torchvision
 from torchvision import datasets, models, transforms
 import os
-from config import dset_root
+from config import dset_root, setup_dataset
 import random
 import argparse
 import copy
