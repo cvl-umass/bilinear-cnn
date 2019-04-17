@@ -221,9 +221,9 @@ def train_model(model, dset_loader, criterion,
         # update scheduler
         if scheduler is not None:
             if isinstance(scheduler, \
-                    torch.optim.lr_scheduler.ReduceLROnPlateau) and \
-                    (itr + 1) % val_frequency == 0:
-                scheduler.step(val_acc)
+                    torch.optim.lr_scheduler.ReduceLROnPlateau): 
+                if (itr + 1) % val_frequency == 0:
+                    scheduler.step(val_acc)
             else:
                 if epoch > last_epoch and scheduler is not None:
                     last_epoch = epoch
