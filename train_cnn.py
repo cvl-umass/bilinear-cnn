@@ -304,7 +304,10 @@ def main(args):
         f.write(json.dumps(args_dict, sort_keys=True, indent=4))
 
     # make sure the dataset is ready
-    setup_dataset(args.dataset)
+    if 'inat' in args.dataset:
+        setup_dataset('inat')
+    else:
+        setup_dataset(args.dataset)
 
     # ==================  Craete data loader ==================================
     data_transforms = {
