@@ -116,8 +116,6 @@ def train_model(model, dset_loader, criterion,
     update_frequency = batch_size_update // bs 
     model.train()
     last_epoch = 0 
-    import pdb
-    pdb.set_trace()
     for itr in range(start_itr, maxItr):
         # at the end of validation set model.train()
         if (itr + 1) % val_frequency == 0 or itr == maxItr - 1:
