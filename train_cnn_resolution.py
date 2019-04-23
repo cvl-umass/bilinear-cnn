@@ -102,6 +102,9 @@ def train_model(model, dset_loader, criterion,
     val_every_number_examples = max(10000,
                     len(dset_loader['train'].dataset) // 5)
     val_frequency = val_every_number_examples // dset_loader['train'].batch_size 
+    checkpoint_frequency = 5 * len(dset_loader['train'].dataset) / \
+                                dset_loader['train'].batch_size
+    last_checkpoint = start_itr  - 1
     # val_frequency = 10000 // dset_loader['train'].batch_size 
     logger = logging.getLogger(logger_name)
     logger_filename = logger.handlers[1].stream.name
@@ -232,22 +235,25 @@ def train_model(model, dset_loader, criterion,
                     last_epoch = epoch
                     scheduler.step()
         # checkpoint
-        if (itr + 1) & val_frequency == 0 or itr == maxItr - 1:
+        if (itr + 1) % val_frequency == 0 or itr == maxItr - 1:
             is_best = val_acc > best_acc
             if is_best:
                 best_acc = val_acc
                 # best_model_wts = copy.deepcopy(model.state_dict())
 
-            checkpoint_dict = {
-                'itr': itr + 1,
-                'state_dict': model.state_dict(),
-                'optimizer' : optimizer.state_dict(),
-                'best_acc':  best_acc
-            }
-            if scheduler is not None:
-                checkpoint_dict['scheduler'] = scheduler.state_dict()
-            save_checkpoint(checkpoint_dict,
-                    is_best, checkpoint_folder=checkpoint_folder)
+            do_checkpoint = (itr - last_checkpoint) >= checkpoint_frequency
+            if is_best or itr == maxItr - 1 or do_checkpoint:
+                last_checkpoint = itr
+                checkpoint_dict = {
+                    'itr': itr + 1,
+                    'state_dict': model.state_dict(),
+                    'optimizer' : optimizer.state_dict(),
+                    'best_acc':  best_acc
+                }
+                if scheduler is not None:
+                    checkpoint_dict['scheduler'] = scheduler.state_dict()
+                save_checkpoint(checkpoint_dict,
+                        is_best, checkpoint_folder=checkpoint_folder)
 
 
     time_elapsed = time.time() - since
