@@ -64,8 +64,8 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
-                {'params': fc_params_to_update, 'weight_decay': 1e-5, 'lr': 1e-2}],
-                lr=lr, momentum=0.9, weight_decay=wd)
+                {'params': fc_params_to_update}],
+                lr=lr, weight_decay=wd)
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
     else:
@@ -88,9 +88,10 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
                 optimizer_ft = optim.SGD(fc_params_to_update, lr=lr, momentum=0.9, 
                                     weight_decay=wd)
             else:
-                optimizer_ft = optim.SGD([
-                    {'params': fc_params_to_update},
-                    {'params': proj_params_to_update, 'weight_decay': proj_wd, 'lr': proj_lr}],
+                optimizer_ft = optim.SGD(
+                    [{'params': fc_params_to_update},
+                    {'params': proj_params_to_update,
+                     'weight_decay': proj_wd, 'lr': proj_lr}],
                     lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam(fc_params_to_update, lr=lr, weight_decay=wd)
@@ -280,7 +281,6 @@ def main(args):
     order = 2
     embedding = args.embedding_dim
     model_names_list = args.model_names_list
-    
 
     args.exp_dir = os.path.join(args.dataset, args.exp_dir)
 
@@ -308,9 +308,14 @@ def main(args):
 
     exp_root = '../exp'
     checkpoint_folder = os.path.join(exp_root, args.exp_dir, 'checkpoints')
+
     if not os.path.isdir(checkpoint_folder):
         os.makedirs(checkpoint_folder)
-    init_checkpoint_folder = os.path.join(exp_root, args.exp_dir, 'init_checkpoints')
+
+    init_checkpoint_folder = os.path.join(
+                        exp_root, args.exp_dir, 'init_checkpoints'
+    )
+
     if not os.path.isdir(init_checkpoint_folder):
         os.makedirs(init_checkpoint_folder)
 
@@ -431,8 +436,16 @@ def main(args):
     init_model_checkpoint = os.path.join(init_checkpoint_folder,
                                         'checkpoint.pth.tar')
     start_itr = 0
-    optim_fc = initialize_optimizer(model, args.init_lr, optimizer='sgd', wd=args.init_wd,
-                                finetune_model=False, proj_lr=args.proj_lr, proj_wd=args.proj_wd)
+    optim_fc = initialize_optimizer(
+            model,
+            args.init_lr,
+            optimizer='sgd',
+            wd=args.init_wd,
+            finetune_model=False,
+            proj_lr=args.proj_lr,
+            proj_wd=args.proj_wd,
+    )
+
     logger_name = 'train_init_logger'
     logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
                 'train_init_history.txt'), logger_name)
@@ -440,7 +453,7 @@ def main(args):
     model_train_fc = False
     fc_model_path = os.path.join(exp_root, args.exp_dir, 'fc_params.pth.tar')
     if not args.train_from_beginning:
-        if os.path.isdir(fc_model_path):
+        if os.path.isfile(fc_model_path):
             # load the fc parameters if they are already trained
             print("=> loading fc parameters'{}'".format(fc_model_path))
             checkpoint = torch.load(fc_model_path)
