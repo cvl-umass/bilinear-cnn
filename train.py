@@ -411,7 +411,8 @@ def main(args):
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
                 batch_size=args.batch_size, shuffle=True, num_workers=4,
-                drop_last=True) for x in ['train', 'val']} 
+                drop_last=drop_last) \
+                for x, drop_last in zip(['train', 'val'], [True, False])} 
 
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -536,8 +537,10 @@ def main(args):
         test_loader = torch.utils.data.DataLoader(dset_test,
                             batch_size=args.batch_size, shuffle=False,
                             num_workers=8, drop_last=False)
+        '''
         print('evaluating test data')
         test_model(model, criterion, test_loader, logger_name)
+        '''
     
 
 

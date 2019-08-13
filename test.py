@@ -51,6 +51,8 @@ def test_model(model, criterion,  dset_loader, logger_name=None):
 
         running_loss += loss.item() * inputs[0].size(0)
         running_corrects += torch.sum(preds == labels.data)
+
+        print('%d / %d'%(idx, len(dset_loader)))
         
         '''
         if idx == 10:

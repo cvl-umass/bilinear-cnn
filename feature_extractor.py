@@ -52,7 +52,7 @@ class DenseNet(nn.Module):
     def __init__(self):
         super(DenseNet, self).__init__()
         self.model = models.densenet201(pretrained=True)
-        sef.input = 224
+        self.input = 224
 
     def forward(self, x):
         x = self.model.features(x)
