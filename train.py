@@ -36,7 +36,7 @@ def save_checkpoint(state, is_best, checkpoint_folder='exp',
 
 # def initialize_optimizer(model_ft, lr, optimizer='sgd', finetune_model=True):
 def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=True,
-        proj_lr=1e-3, proj_wd=1e-5):
+        proj_lr=1e-3, proj_wd=1e-5, beta1=0.9, beta2=0.999):
     fc_params_to_update = []
     params_to_update = []
     proj_params_to_update = []
@@ -65,7 +65,8 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
                 {'params': fc_params_to_update}],
-                lr=lr, weight_decay=wd)
+                lr=lr, weight_decay=wd,
+                betas=(beta1, beta2))
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
     else:
@@ -80,12 +81,12 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
                     param.requires_grad = True
                     proj_params_to_update.append(param)
                 else:
-                    param.requires_grad = False 
+                    param.requires_grad = False
 
         # Observe that all parameters are being optimized
         if optimizer == 'sgd':
             if len(proj_params_to_update) == 0:
-                optimizer_ft = optim.SGD(fc_params_to_update, lr=lr, momentum=0.9, 
+                optimizer_ft = optim.SGD(fc_params_to_update, lr=lr, momentum=0.9,
                                     weight_decay=wd)
             else:
                 optimizer_ft = optim.SGD(
@@ -94,7 +95,8 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
                      'weight_decay': proj_wd, 'lr': proj_lr}],
                     lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
-            optimizer_ft = optim.Adam(fc_params_to_update, lr=lr, weight_decay=wd)
+            optimizer_ft = optim.Adam(fc_params_to_update, lr=lr, weight_decay=wd,
+                                      betas=(beta1, beta2))
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
 
@@ -111,7 +113,7 @@ def train_model(model, dset_loader, criterion,
 
     val_every_number_examples = max(10000,
                     len(dset_loader['train'].dataset) // 5)
-    val_frequency = val_every_number_examples // dset_loader['train'].batch_size 
+    val_frequency = val_every_number_examples // dset_loader['train'].batch_size
     checkpoint_frequency = 5 * len(dset_loader['train'].dataset) / \
                                 dset_loader['train'].batch_size
     last_checkpoint = start_itr  - 1
@@ -121,17 +123,17 @@ def train_model(model, dset_loader, criterion,
     device = next(model.parameters()).device
     since = time.time()
 
-    running_loss = 0.0; running_num_data = 0 
+    running_loss = 0.0; running_num_data = 0
     running_corrects = 0
-    val_loss_history = []; best_acc = 0.0 
+    val_loss_history = []; best_acc = 0.0
     val_acc = 0.0
     # best_model_wts = copy.deepcopy(model.state_dict())
 
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
     bs = dset_loader['train'].batch_size
-    update_frequency = batch_size_update // bs 
+    update_frequency = batch_size_update // bs
     model.train()
-    last_epoch = 0 
+    last_epoch = 0
     for itr in range(start_itr, maxItr):
         # at the end of validation set model.train()
         if (itr + 1) % val_frequency == 0 or itr == maxItr - 1:
@@ -163,7 +165,7 @@ def train_model(model, dset_loader, criterion,
             loss = criterion(outputs, labels)
 
             _, preds = torch.max(outputs, 1)
-            
+
             loss.backward()
             '''
             torch.cuda.synchronize()
@@ -180,7 +182,7 @@ def train_model(model, dset_loader, criterion,
 
         epoch = ((itr + 1) *  bs) // len(dset_loader['train'].dataset)
 
-        running_num_data += inputs[0].size(0) 
+        running_num_data += inputs[0].size(0)
         running_loss += loss.item() * inputs[0].size(0)
         running_corrects += torch.sum(preds == labels.data)
 
@@ -208,7 +210,7 @@ def train_model(model, dset_loader, criterion,
                     loss = criterion(outputs, labels)
 
                     _, preds = torch.max(outputs, 1)
-                    
+
                 val_running_loss += loss.item() * inputs[0].size(0)
                 val_running_corrects += torch.sum(preds == labels.data)
             val_loss = val_running_loss / len(dset_loader['val'].dataset)
@@ -225,7 +227,7 @@ def train_model(model, dset_loader, criterion,
         # update scheduler
         if scheduler is not None:
             if isinstance(scheduler, \
-                    torch.optim.lr_scheduler.ReduceLROnPlateau): 
+                    torch.optim.lr_scheduler.ReduceLROnPlateau):
                 if (itr + 1) % val_frequency == 0:
                     scheduler.step(val_acc)
             else:
@@ -267,11 +269,11 @@ def train_model(model, dset_loader, criterion,
     return model
 
 def main(args):
-    fine_tune = True 
+    fine_tune = True
     pre_train = True
 
     lr = args.lr
-    input_size = args.input_size 
+    input_size = args.input_size
     # input_size = [448]
     # keep_aspect = True
     # model_names_list = ['vgg']
@@ -293,7 +295,7 @@ def main(args):
         crop_from_size = [(x * 256) // 224 for x in input_size]
     else:
         crop_from_size = input_size
-        
+
     if 'inat' in args.dataset:
         split = {'train': 'train', 'val': 'val'}
     else:
@@ -401,28 +403,28 @@ def main(args):
         dset = {x: dataset(dset_root['inat'], split[x], subset, \
                         transform=data_transforms[x]) for x in ['train', 'val']}
         dset_test = dataset(dset_root['inat'], 'test', subset, \
-                        transform=data_transforms['val']) 
+                        transform=data_transforms['val'])
     else:
         dset = {x: dataset(dset_root[args.dataset], split[x], \
                         transform=data_transforms[x]) for x in ['train', 'val']}
         dset_test = dataset(dset_root[args.dataset], 'test', \
-                        transform=data_transforms['val']) 
+                        transform=data_transforms['val'])
 
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
                 batch_size=args.batch_size, shuffle=True, num_workers=4,
                 drop_last=drop_last) \
-                for x, drop_last in zip(['train', 'val'], [True, False])} 
+                for x, drop_last in zip(['train', 'val'], [True, False])}
 
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     #======================= Initialize the model =========================
-    
+
     # The argument embedding is used only when tensor_sketch is True
     # The argument order is used only when the model parameters are shared
     # between feature extractors
-    model = create_bcnn_model(model_names_list, len(dset['train'].classes), 
+    model = create_bcnn_model(model_names_list, len(dset['train'].classes),
                     args.pooling_method, fine_tune, pre_train, embedding, order,
                     m_sqrt_iter=args.matrix_sqrt_iter,
                     fc_bottleneck=args.fc_bottleneck, proj_dim=args.proj_dim,
@@ -432,7 +434,7 @@ def main(args):
 
     # Setup the loss fxn
     criterion = nn.CrossEntropyLoss()
-    
+
     #====================== Initialize optimizer ==============================
     init_model_checkpoint = os.path.join(init_checkpoint_folder,
                                         'checkpoint.pth.tar')
@@ -448,7 +450,7 @@ def main(args):
     )
 
     logger_name = 'train_init_logger'
-    logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
+    logger = initializeLogging(os.path.join(exp_root, args.exp_dir,
                 'train_init_history.txt'), logger_name)
 
     model_train_fc = False
@@ -489,7 +491,8 @@ def main(args):
 
     if fine_tune:
         optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
-                                    wd=args.wd, finetune_model=fine_tune)
+                                    wd=args.wd, finetune_model=fine_tune,
+                                    beta1=args.beta1, beta2=args.beta2)
 
         if 'inat' not in args.dataset:
             scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
@@ -498,7 +501,7 @@ def main(args):
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'max')
 
         logger_name = 'train_logger'
-        logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
+        logger = initializeLogging(os.path.join(exp_root, args.exp_dir,
                 'train_history.txt'), logger_name)
 
         start_itr = 0
@@ -516,7 +519,7 @@ def main(args):
                 print("=> loaded checkpoint '{}' (iteration{})"
                       .format(checkpoint_filename, checkpoint['itr']))
 
-        ''' 
+        '''
         temp = torch.load('/data/tsungyulin/Research/bilinear-cnn/model/vgg_16_epoch_54.pth')
         model.module.fc.bias.data.copy_(temp['module.fc.bias'].data)
         model.module.fc.weight.data.copy_(temp['module.fc.weight'].data)
@@ -524,7 +527,7 @@ def main(args):
 
         # parallelize the model if using multiple gpus
         # if torch.cuda.device_count() > 1:
-            
+
         # Train the miodel
         model = train_model(model, dset_loader, criterion, optim,
                 batch_size_update=args.batch_size_update_model,
@@ -541,7 +544,7 @@ def main(args):
         print('evaluating test data')
         test_model(model, criterion, test_loader, logger_name)
         '''
-    
+
 
 
 if __name__ == '__main__':
@@ -599,6 +602,10 @@ if __name__ == '__main__':
             help='add bottelneck to the fc layers')
     parser.add_argument('--gamma', default=0.5, type=float,
             help='the value of gamma for gamma democratic aggregation')
+    parser.add_argument('--beta1', default=0.99, type=float,
+            help='the value of beta1 for adam')
+    parser.add_argument('--beta2', default=0.999, type=float,
+            help='the value of beta2 for adam')
     args = parser.parse_args()
 
     main(args)

@@ -1,17 +1,35 @@
 from torchvision import models
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+class DenseNet(nn.Module):
+    def __init__(self, input_size):
+        super(DenseNet, self).__init__()
+        self.model = models.densenet201(pretrained=True)
+        self.input = input_size
+        self.output_dim = 1920
+
+    def forward(self, x):
+        x = self.model.features(x)
+        x = F.relu(x, inplace=True)
+        x = F.adaptive_avg_pool2d(x, (1, 1))
+
+        return x
+
+    def get_output_dim(self):
+        return self.output_dim
 
 class ResNet(nn.Module):
     def __init__(self, input_size):
         super(ResNet, self).__init__()
-        
+
         self.model = models.resnet101(pretrained=True)
         self.input_size = input_size
         '''
         if input_size == 448:
             kernel_size = 2 * self.model.avgpool.kernel_size
-            self.model.avgpool = nn.AvgPool2d(kernel_size) 
+            self.model.avgpool = nn.AvgPool2d(kernel_size)
         '''
         self.model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.output_dim = 2048
@@ -32,7 +50,7 @@ class ResNet(nn.Module):
         return x
 
     def get_output_dim(self):
-        return self.output_dim 
+        return self.output_dim
 
 class AlexNet(nn.Module):
     def __init__(self):
@@ -71,21 +89,8 @@ class VGG(nn.Module):
         return x
 
     def get_output_dim(self):
-        return self.output_dim 
+        return self.output_dim
 
-class DenseNet(nn.Module):
-    def __init__(self):
-        super(DenseNet, self).__init__()
-        self.model = models.densenet201(pretrained=True)
-        sef.input = 224
-        self.output_dim = 1920
-
-    def forward(self, x):
-        x = self.model.features(x)
-        return x
-
-    def get_output_dim(self):
-        return self.output_dim 
 
 class Inception(nn.Module):
     def __init__(self):
@@ -134,23 +139,25 @@ class CNN_Model(nn.Module):
         self.feature_dim = feature_dim
         self.fc = nn.Linear(self.feature_dim, num_classes, bias=True)
 
-    def forward(self, x): 
+    def forward(self, x):
         x = self.feature_extractors(x)
         x = x.view(x.size(0), -1)
         y = self.fc(x)
-        
-        return y 
+
+        return y
 
 def create_cnn_model(model_name, num_classes, input_size=224,
                     fine_tune=True, pre_train=True):
+    '''
     if input_size != 224:
-        assert model_name == 'resnet' 
+        assert model_name == 'resnet'
+    '''
     if model_name == 'vgg':
         feature_extractors = VGG()
     elif model_name == 'resnet':
         feature_extractors = ResNet(input_size)
     elif model_name == 'densenet':
-        feature_extractors = DenseNet()
+        feature_extractors = DenseNet(input_size)
     else:
         exit()
 

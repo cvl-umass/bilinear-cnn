@@ -35,7 +35,8 @@ def save_checkpoint(state, is_best, checkpoint_folder='exp',
         shutil.copyfile(filename, best_model_filename)
 
 # def initialize_optimizer(model_ft, lr, optimizer='sgd', finetune_model=True):
-def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=True):
+def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=True,
+        proj_lr=1e-3, proj_wd=1e-5, beta1=0.9, beta2=0.999):
     fc_params_to_update = []
     params_to_update = []
     if finetune_model:
@@ -62,8 +63,9 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
-                {'params': fc_params_to_update, 'weight_decay': 1e-5, 'lr': 1e-2}],
-                lr=lr, momentum=0.9, weight_decay=wd)
+                {'params': fc_params_to_update}],
+                lr=lr, weight_decay=wd,
+                betas=(beta1, beta2))
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
     else:
@@ -73,14 +75,15 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
                 param.requires_grad = True
                 fc_params_to_update.append(param)
             else:
-                param.requires_grad = False 
+                param.requires_grad = False
 
         # Observe that all parameters are being optimized
         if optimizer == 'sgd':
-            optimizer_ft = optim.SGD(fc_params_to_update, lr=lr, momentum=0.9, 
+            optimizer_ft = optim.SGD(fc_params_to_update, lr=lr, momentum=0.9,
                                 weight_decay=wd)
         elif optimizer == 'adam':
-            optimizer_ft = optim.Adam(fc_params_to_update, lr=lr, weight_decay=wd)
+            optimizer_ft = optim.Adam(fc_params_to_update, lr=lr, weight_decay=wd,
+                                      betas=(beta1, beta2))
         else:
             raise ValueError('Unknown optimizer: %s' % optimizer)
 
@@ -97,28 +100,28 @@ def train_model(model, dset_loader, criterion,
 
     val_every_number_examples = max(10000,
                     len(dset_loader['train'].dataset) // 5)
-    val_frequency = val_every_number_examples // dset_loader['train'].batch_size 
+    val_frequency = val_every_number_examples // dset_loader['train'].batch_size
     checkpoint_frequency = 5 * len(dset_loader['train'].dataset) // \
                                 dset_loader['train'].batch_size
     last_checkpoint = start_itr  - 1
-    # val_frequency = 10000 // dset_loader['train'].batch_size 
+    # val_frequency = 10000 // dset_loader['train'].batch_size
     logger = logging.getLogger(logger_name)
     logger_filename = logger.handlers[1].stream.name
 
     device = next(model.parameters()).device
     since = time.time()
 
-    running_loss = 0.0; running_num_data = 0 
+    running_loss = 0.0; running_num_data = 0
     running_corrects = 0
-    val_loss_history = []; best_acc = 0.0 
+    val_loss_history = []; best_acc = 0.0
     val_acc = 0.0
     # best_model_wts = copy.deepcopy(model.state_dict())
 
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
     bs = dset_loader['train'].batch_size
-    update_frequency = batch_size_update // bs 
+    update_frequency = batch_size_update // bs
     model.train()
-    last_epoch = 0 
+    last_epoch = 0
     for itr in range(start_itr, maxItr):
         # at the end of validation set model.train()
         if (itr + 1) % val_frequency == 0 or itr == maxItr - 1:
@@ -152,7 +155,7 @@ def train_model(model, dset_loader, criterion,
             loss = criterion(outputs, labels)
 
             _, preds = torch.max(outputs, 1)
-            
+
             loss.backward()
             '''
             torch.cuda.synchronize()
@@ -170,10 +173,10 @@ def train_model(model, dset_loader, criterion,
         epoch = ((itr + 1) *  bs) // len(dset_loader['train'].dataset)
 
         '''
-        running_num_data += inputs[0].size(0) 
+        running_num_data += inputs[0].size(0)
         running_loss += loss.item() * inputs[0].size(0)
         '''
-        running_num_data += inputs.size(0) 
+        running_num_data += inputs.size(0)
         running_loss += loss.item() * inputs.size(0)
         running_corrects += torch.sum(preds == labels.data)
 
@@ -205,7 +208,7 @@ def train_model(model, dset_loader, criterion,
                     loss = criterion(outputs, labels)
 
                     _, preds = torch.max(outputs, 1)
-                    
+
                 # val_running_loss += loss.item() * inputs[0].size(0)
                 val_running_loss += loss.item() * inputs.size(0)
                 val_running_corrects += torch.sum(preds == labels.data)
@@ -225,7 +228,7 @@ def train_model(model, dset_loader, criterion,
         if scheduler is not None:
             if isinstance(scheduler, \
                     torch.optim.lr_scheduler.ReduceLROnPlateau):
-                if (itr + 1) % val_frequency == 0: 
+                if (itr + 1) % val_frequency == 0:
                     scheduler.step(val_acc)
             else:
                 if epoch > last_epoch and scheduler is not None:
@@ -268,11 +271,11 @@ def train_model(model, dset_loader, criterion,
     return model
 
 def main(args):
-    fine_tune = True 
+    fine_tune = True
     pre_train = True
 
     lr = args.lr
-    input_size = args.input_size 
+    input_size = args.input_size
     # input_size = [448]
     # keep_aspect = True
     # model_names_list = ['vgg']
@@ -292,7 +295,7 @@ def main(args):
         crop_from_size = [(x * 256) // 224 for x in input_size]
     else:
         crop_from_size = input_size
-        
+
     if 'inat' in args.dataset:
         split = {'train': 'train', 'val': 'val'}
     else:
@@ -322,7 +325,7 @@ def main(args):
         'train': [transforms.Compose([
             transforms.Resize(x[0]),
             # transforms.CenterCrop(x[1]),
-            transforms.RandomCrop(x[1]), 
+            transforms.RandomCrop(x[1]),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
@@ -355,21 +358,21 @@ def main(args):
         dset = {x: dataset(dset_root['inat'], split[x], subset, \
                         transform=data_transforms[x]) for x in ['train', 'val']}
         dset_test = dataset(dset_root['inat'], 'test', subset, \
-                        transform=data_transforms['val']) 
+                        transform=data_transforms['val'])
     else:
-        dset = {x: dataset(dset_root[args.dataset], split[x], 
+        dset = {x: dataset(dset_root[args.dataset], split[x],
                         transform=data_transforms[x]) for x in ['train', 'val']}
-        dset_test = dataset(dset_root[args.dataset], 'test', 
-                        transform=data_transforms['val']) 
+        dset_test = dataset(dset_root[args.dataset], 'test',
+                        transform=data_transforms['val'])
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
                 batch_size=args.batch_size, shuffle=True, num_workers=4,
-                drop_last=True) for x in ['train', 'val']} 
+                drop_last=True) for x in ['train', 'val']}
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     #======================= Initialize the model =========================
-    
+
     # The argument embedding is used only when tensor_sketch is True
     # The argument order is used only when the model parameters are shared
     # between feature extractors
@@ -380,7 +383,7 @@ def main(args):
 
     # Setup the loss fxn
     criterion = nn.CrossEntropyLoss()
-    
+
     #====================== Initialize optimizer ==============================
     start_itr = 0
 
@@ -394,7 +397,7 @@ def main(args):
         else:
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'max')
         logger_name = 'train_logger'
-        logger = initializeLogging(os.path.join(exp_root, args.exp_dir, 
+        logger = initializeLogging(os.path.join(exp_root, args.exp_dir,
                 'train_history.txt'), logger_name)
 
         start_itr = 0
@@ -415,7 +418,7 @@ def main(args):
 
         # parallelize the model if using multiple gpus
         # if torch.cuda.device_count() > 1:
-            
+
         # Train the miodel
         model = train_model(model, dset_loader, criterion, optim,
                 batch_size_update=args.batch_size_update_model,
@@ -430,8 +433,8 @@ def main(args):
                             batch_size=args.batch_size, shuffle=False,
                             num_workers=8, drop_last=False)
         print('evaluating test data')
-        test_model(model, criterion, test_loader, logger_name)
-    
+        # test_model(model, criterion, test_loader, logger_name)
+
 
 
 if __name__ == '__main__':
@@ -449,13 +452,13 @@ if __name__ == '__main__':
     #         help='number of iterations')
     parser.add_argument('--init_lr', default=1.0, type=float,
             help='learning rate')
-    parser.add_argument('--lr', default=1e-2, type=float,
+    parser.add_argument('--lr', default=1e-4, type=float,
             help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float,
             help='weight decay')
     parser.add_argument('--init_wd', default=1e-8, type=float,
             help='weight decay for initializing fc layer')
-    parser.add_argument('--optimizer', default='sgd', type=str,
+    parser.add_argument('--optimizer', default='adam', type=str,
             help='optimizer sgd|adam')
     parser.add_argument('--exp_dir', default='exp', type=str,
             help='foldername where to save the results for the experiment')
@@ -469,17 +472,12 @@ if __name__ == '__main__':
             help='input size as a list of sizes')
     parser.add_argument('--model_names', default='vgg',
             type=str, help='input size as a list of sizes')
-    parser.add_argument('--sketch', action='store_true',
-            help='approximate tensor product in sketch space')
-    parser.add_argument('--embedding_dim', type=int, default=8192,
-            help='the dimension for the tnesor sketch approximation')
-    parser.add_argument('--matrix_sqrt_iter', type=int, default=0,
-            help='number of iteration for the Newtons Method approximating' + \
-                    'matirx square rooti. Default=0 [no matrix square root]')
-    parser.add_argument('--demo_agg', action='store_true',
-            help='normalization with democratic aggregation')
     parser.add_argument('--fc_bottleneck', action='store_true',
             help='add bottelneck to the fc layers')
+    parser.add_argument('--beta1', default=0.99, type=float,
+            help='the value of beta1 for adam')
+    parser.add_argument('--beta2', default=0.999, type=float,
+            help='the value of beta2 for adam')
     args = parser.parse_args()
 
     main(args)
