@@ -366,8 +366,9 @@ def main(args):
                         transform=data_transforms['val'])
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
-                batch_size=args.batch_size, shuffle=True, num_workers=4,
-                drop_last=True) for x in ['train', 'val']}
+                        batch_size=args.batch_size, shuffle=True,
+                        num_workers=4, drop_last=drop_last) \
+                        for x, drop_last in zip(['train', 'val'], [True, False])}
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
