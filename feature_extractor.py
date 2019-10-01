@@ -56,6 +56,7 @@ class DenseNet(nn.Module):
 
     def forward(self, x):
         x = self.model.features(x)
+        x = F.relu(x, inplace=True)
         return x
 
 class Inception(nn.Module):
