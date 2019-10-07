@@ -64,7 +64,7 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
-                {'params': fc_params_to_update}],
+                {'params': fc_params_to_update, 'weight_decay': 0, 'lr': 1e-2}],
                 lr=lr, weight_decay=wd,
                 betas=(beta1, beta2))
         else:
@@ -350,38 +350,6 @@ def main(args):
             for x in zip(crop_from_size, input_size)],
     }
 
-    '''
-    if keep_aspect:
-        data_transforms = {
-            'train': [transforms.Compose([
-                transforms.Resize(x[0]),
-                transforms.CenterCrop(x[1]),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-            'val': [transforms.Compose([
-                transforms.Resize(x),
-                transforms.CenterCrop(x),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-        }
-    else:
-        data_transforms = {
-            'train': [transforms.Compose([
-                transforms.Resize(x[0]),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-            'val': [transforms.Compose([
-                transforms.Resize(x[0]),
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]) \
-                for x in zip(crop_from_size, input_size)],
-        }
-    '''
 
     if args.dataset == 'cub':
         from CUBDataset import CUBDataset as dataset
@@ -412,7 +380,7 @@ def main(args):
 
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
-                batch_size=args.batch_size, shuffle=True, num_workers=4,
+                batch_size=args.batch_size, shuffle=True, num_workers=12,
                 drop_last=drop_last) \
                 for x, drop_last in zip(['train', 'val'], [True, False])}
 
@@ -535,6 +503,7 @@ def main(args):
                 epoch=args.epoch, logger_name=logger_name,
                 checkpoint_folder=checkpoint_folder,
                 start_itr=start_itr, scheduler=scheduler)
+
     if 'inat' not in args.dataset:
         # do test
         test_loader = torch.utils.data.DataLoader(dset_test,
