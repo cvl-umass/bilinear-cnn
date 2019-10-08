@@ -93,7 +93,7 @@ def train_model(model, dset_loader, criterion,
         optimizer, batch_size_update=256,
         # maxItr=50000, logger_name='train_logger', checkpoint_folder='exp',
         epoch=45, logger_name='train_logger', checkpoint_folder='exp',
-        start_itr=0, clip_grad=-1, scheduler=None):
+        start_itr=0, clip_grad=-1, scheduler=None, fine_tune=True):
 
     maxItr = epoch * len(dset_loader['train'].dataset) // \
                     dset_loader['train'].batch_size + 1
@@ -120,7 +120,12 @@ def train_model(model, dset_loader, criterion,
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
     bs = dset_loader['train'].batch_size
     update_frequency = batch_size_update // bs
-    model.train()
+
+    if fine_tune:
+        model.train()
+    else:
+        model.module.fc.train()
+
     last_epoch = 0
     for itr in range(start_itr, maxItr):
         # at the end of validation set model.train()
@@ -167,15 +172,13 @@ def train_model(model, dset_loader, criterion,
                 if clip_grad > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(),
                                                     clip_grad)
+                import pdb
+                pdb.set_trace()
                 optimizer.step()
                 optimizer.zero_grad()
 
         epoch = ((itr + 1) *  bs) // len(dset_loader['train'].dataset)
 
-        '''
-        running_num_data += inputs[0].size(0)
-        running_loss += loss.item() * inputs[0].size(0)
-        '''
         running_num_data += inputs.size(0)
         running_loss += loss.item() * inputs.size(0)
         running_corrects += torch.sum(preds == labels.data)
@@ -222,7 +225,10 @@ def train_model(model, dset_loader, criterion,
             plot_log(logger_filename,
                     logger_filename.replace('history.txt', 'curve.png'), True)
 
-            model.train()
+            if fine_tune:
+                model.train()
+            else:
+                model.module.fc.train()
 
         # update scheduler
         if scheduler is not None:
@@ -271,7 +277,7 @@ def train_model(model, dset_loader, criterion,
     return model
 
 def main(args):
-    fine_tune = True
+    fine_tune = not args.no_finetune 
     pre_train = True
 
     lr = args.lr
@@ -388,45 +394,52 @@ def main(args):
     #====================== Initialize optimizer ==============================
     start_itr = 0
 
+    optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
+                                wd=args.wd, finetune_model=fine_tune)
+
+    if 'inat' not in args.dataset:
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
+                            lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'max')
+    logger_name = 'train_logger'
+    logger = initializeLogging(os.path.join(exp_root, args.exp_dir,
+            'train_history.txt'), logger_name)
+
+    start_itr = 0
+    # load from checkpoint if exist
+    if not args.train_from_beginning:
+        checkpoint_filename = os.path.join(checkpoint_folder,
+                    'checkpoint.pth.tar')
+        if os.path.isfile(checkpoint_filename):
+            print("=> loading checkpoint '{}'".format(checkpoint_filename))
+            checkpoint = torch.load(checkpoint_filename)
+            start_itr = checkpoint['itr']
+            model.load_state_dict(checkpoint['state_dict'])
+            optim.load_state_dict(checkpoint['optimizer'])
+            scheduler.load_state_dict(checkpoint['scheduler'])
+            print("=> loaded checkpoint '{}' (iteration{})"
+                  .format(checkpoint_filename, checkpoint['itr']))
+
+
+    # parallelize the model if using multiple gpus
+    # if torch.cuda.device_count() > 1:
+
     if fine_tune:
-        optim = initialize_optimizer(model, args.lr, optimizer=args.optimizer,
-                                    wd=args.wd, finetune_model=fine_tune)
+        model.train()
+    else:
+        # fix the batchnorm by model.eval()
+        model.eval()
+        model.module.fc.train()
 
-        if 'inat' not in args.dataset:
-            scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
-                                lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
-        else:
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'max')
-        logger_name = 'train_logger'
-        logger = initializeLogging(os.path.join(exp_root, args.exp_dir,
-                'train_history.txt'), logger_name)
-
-        start_itr = 0
-        # load from checkpoint if exist
-        if not args.train_from_beginning:
-            checkpoint_filename = os.path.join(checkpoint_folder,
-                        'checkpoint.pth.tar')
-            if os.path.isfile(checkpoint_filename):
-                print("=> loading checkpoint '{}'".format(checkpoint_filename))
-                checkpoint = torch.load(checkpoint_filename)
-                start_itr = checkpoint['itr']
-                model.load_state_dict(checkpoint['state_dict'])
-                optim.load_state_dict(checkpoint['optimizer'])
-                scheduler.load_state_dict(checkpoint['scheduler'])
-                print("=> loaded checkpoint '{}' (iteration{})"
-                      .format(checkpoint_filename, checkpoint['itr']))
-
-
-        # parallelize the model if using multiple gpus
-        # if torch.cuda.device_count() > 1:
-
-        # Train the miodel
-        model = train_model(model, dset_loader, criterion, optim,
-                batch_size_update=args.batch_size_update_model,
-                # maxItr=args.iteration, logger_name=logger_name,
-                epoch=args.epoch, logger_name=logger_name,
-                checkpoint_folder=checkpoint_folder,
-                start_itr=start_itr, scheduler=scheduler)
+    # Train the miodel
+    model = train_model(model, dset_loader, criterion, optim,
+            batch_size_update=args.batch_size_update_model,
+            # maxItr=args.iteration, logger_name=logger_name,
+            epoch=args.epoch, logger_name=logger_name,
+            checkpoint_folder=checkpoint_folder,
+            start_itr=start_itr, scheduler=scheduler,
+            fine_tune=fine_tune)
 
     if 'inat' not in args.dataset:
         # do test
@@ -479,6 +492,8 @@ if __name__ == '__main__':
             help='the value of beta1 for adam')
     parser.add_argument('--beta2', default=0.999, type=float,
             help='the value of beta2 for adam')
+    parser.add_argument('--no_finetune', action='store_true',
+            help='not do fine tuning')
     args = parser.parse_args()
 
     main(args)

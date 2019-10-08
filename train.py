@@ -106,7 +106,7 @@ def train_model(model, dset_loader, criterion,
         optimizer, batch_size_update=256,
         # maxItr=50000, logger_name='train_logger', checkpoint_folder='exp',
         epoch=45, logger_name='train_logger', checkpoint_folder='exp',
-        start_itr=0, clip_grad=-1, scheduler=None):
+        start_itr=0, clip_grad=-1, scheduler=None, fine_tune=True):
 
     maxItr = epoch * len(dset_loader['train'].dataset) // \
                     dset_loader['train'].batch_size + 1
@@ -132,7 +132,12 @@ def train_model(model, dset_loader, criterion,
     dset_iter = {x:iter(dset_loader[x]) for x in ['train', 'val']}
     bs = dset_loader['train'].batch_size
     update_frequency = batch_size_update // bs
-    model.train()
+
+    if fine_tune:
+        model.train()
+    else:
+        model.module.fc.train()
+
     last_epoch = 0
     for itr in range(start_itr, maxItr):
         # at the end of validation set model.train()
@@ -223,7 +228,11 @@ def train_model(model, dset_loader, criterion,
             plot_log(logger_filename,
                     logger_filename.replace('history.txt', 'curve.png'), True)
 
-            model.train()
+            if fine_tune:
+                model.train()
+            else:
+                model.module.fc.train()
+
         # update scheduler
         if scheduler is not None:
             if isinstance(scheduler, \
@@ -269,7 +278,7 @@ def train_model(model, dset_loader, criterion,
     return model
 
 def main(args):
-    fine_tune = True
+    fine_tune = not args.no_finetune 
     pre_train = True
 
     lr = args.lr
@@ -449,10 +458,13 @@ def main(args):
 
     if model_train_fc:
         # do the training
+        if not fine_tune:
+            model.eval()
+
         model = train_model(model, dset_loader, criterion, optim_fc,
                 batch_size_update=256,
                 epoch=args.init_epoch, logger_name=logger_name, start_itr=start_itr,
-                checkpoint_folder=init_checkpoint_folder)
+                checkpoint_folder=init_checkpoint_folder, fine_tune=fine_tune)
         shutil.copyfile(
                 os.path.join(init_checkpoint_folder, 'model_best.pth.tar'),
                 fc_model_path)
@@ -575,6 +587,9 @@ if __name__ == '__main__':
             help='the value of beta1 for adam')
     parser.add_argument('--beta2', default=0.999, type=float,
             help='the value of beta2 for adam')
+    parser.add_argument('--no_finetune', action='store_true',
+            help='not do fine tuning')
+
     args = parser.parse_args()
 
     main(args)
