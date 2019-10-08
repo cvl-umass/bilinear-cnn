@@ -172,8 +172,6 @@ def train_model(model, dset_loader, criterion,
                 if clip_grad > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(),
                                                     clip_grad)
-                import pdb
-                pdb.set_trace()
                 optimizer.step()
                 optimizer.zero_grad()
 
