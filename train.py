@@ -58,14 +58,14 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
             optimizer_ft = optim.SGD([
                 {'params': params_to_update},
                 {'params': proj_params_to_update,
-                 'weight_decay': proj_wd, 'lr': proj_lr}],
+                 'weight_decay': proj_wd, 'lr': proj_lr},
                 {'params': fc_params_to_update, 'weight_decay': 0, 'lr': 1e-2}],
                 lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
                 {'params': proj_params_to_update,
-                 'weight_decay': proj_wd, 'lr': proj_lr}],
+                 'weight_decay': proj_wd, 'lr': proj_lr},
                 {'params': fc_params_to_update, 'weight_decay': 0, 'lr': 1e-2}],
                 lr=lr, weight_decay=wd,
                 betas=(beta1, beta2))
