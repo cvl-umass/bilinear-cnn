@@ -34,7 +34,6 @@ def save_checkpoint(state, is_best, checkpoint_folder='exp',
     if is_best:
         shutil.copyfile(filename, best_model_filename)
 
-# def initialize_optimizer(model_ft, lr, optimizer='sgd', finetune_model=True):
 def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=True,
         proj_lr=1e-3, proj_wd=1e-5, beta1=0.9, beta2=0.999):
     fc_params_to_update = []
@@ -163,22 +162,12 @@ def train_model(model, dset_loader, criterion,
         labels = labels.to(device)
 
         with torch.set_grad_enabled(True):
-            '''
-            torch.cuda.synchronize()
-            torch.cuda.synchronize()
-            ta = time.perf_counter()
-            '''
             outputs = model(*inputs)
             loss = criterion(outputs, labels)
 
             _, preds = torch.max(outputs, 1)
 
             loss.backward()
-            '''
-            torch.cuda.synchronize()
-            tb = time.perf_counter()
-            print('time: {:.02e}s'.format((tb - ta)/outputs.shape[0]))
-            '''
 
             if (itr + 1) % update_frequency == 0:
                 if clip_grad > 0:
@@ -235,6 +224,7 @@ def train_model(model, dset_loader, criterion,
             else:
                 model.module.fc.train()
 
+
         # update scheduler
         if scheduler is not None:
             if isinstance(scheduler, \
@@ -274,9 +264,7 @@ def train_model(model, dset_loader, criterion,
     best_model_wts = torch.load(os.path.join(checkpoint_folder,
                                     'model_best.pth.tar'))
     model.load_state_dict(best_model_wts['state_dict'])
-    # model.load_state_dict(best_model_wts)
 
-    # return model, val_acc_history
     return model
 
 def main(args):
@@ -285,11 +273,6 @@ def main(args):
 
     lr = args.lr
     input_size = args.input_size
-    # input_size = [448]
-    # keep_aspect = True
-    # model_names_list = ['vgg']
-    # tensor_sketch = False
-    # embedding = 8192
 
     order = 2
     embedding = args.embedding_dim
@@ -391,7 +374,7 @@ def main(args):
 
 
     dset_loader = {x: torch.utils.data.DataLoader(dset[x],
-                batch_size=args.batch_size, shuffle=True, num_workers=12,
+                batch_size=args.batch_size, shuffle=True, num_workers=8,
                 drop_last=drop_last) \
                 for x, drop_last in zip(['train', 'val'], [True, False])}
 
@@ -501,12 +484,6 @@ def main(args):
                 print("=> loaded checkpoint '{}' (iteration{})"
                       .format(checkpoint_filename, checkpoint['itr']))
 
-        '''
-        temp = torch.load('/data/tsungyulin/Research/bilinear-cnn/model/vgg_16_epoch_54.pth')
-        model.module.fc.bias.data.copy_(temp['module.fc.bias'].data)
-        model.module.fc.weight.data.copy_(temp['module.fc.weight'].data)
-        '''
-
         # parallelize the model if using multiple gpus
         # if torch.cuda.device_count() > 1:
 
@@ -517,17 +494,6 @@ def main(args):
                 epoch=args.epoch, logger_name=logger_name,
                 checkpoint_folder=checkpoint_folder,
                 start_itr=start_itr, scheduler=scheduler)
-
-    if 'inat' not in args.dataset:
-        # do test
-        test_loader = torch.utils.data.DataLoader(dset_test,
-                            batch_size=args.batch_size, shuffle=False,
-                            num_workers=8, drop_last=False)
-        '''
-        print('evaluating test data')
-        test_model(model, criterion, test_loader, logger_name)
-        '''
-
 
 
 if __name__ == '__main__':
@@ -541,8 +507,6 @@ if __name__ == '__main__':
             help='number of epochs')
     parser.add_argument('--init_epoch', default=25, type=int,
             help='number of epochs for initializing fc layer')
-    # parser.add_argument('--iteration', default=20000, type=int,
-    #         help='number of iterations')
     parser.add_argument('--init_lr', default=1.0, type=float,
             help='learning rate')
     parser.add_argument('--lr', default=1e-3, type=float,
@@ -557,8 +521,6 @@ if __name__ == '__main__':
             help='foldername where to save the results for the experiment')
     parser.add_argument('--train_from_beginning', action='store_true',
             help='train the model from first epoch, i.e. ignore the checkpoint')
-    # parser.add_argument('--train_split', default='train_val', type=str,
-    #         help='split used to train augmentor')
     parser.add_argument('--dataset', default='cub', type=str,
             help='cub | cars | aircrafts')
     parser.add_argument('--input_size', nargs='+', default=[448], type=int,
