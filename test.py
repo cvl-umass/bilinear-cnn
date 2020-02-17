@@ -22,11 +22,6 @@ def test_model(model, criterion,  dset_loader, logger_name=None):
     model.eval()
 
     running_loss = 0.0; running_corrects = 0
-    '''
-    torch.cuda.synchronize()
-    torch.cuda.synchronize()
-    ta = time.perf_counter()
-    '''
     for idx, all_fields in enumerate(dset_loader):
         labels = all_fields[-2]
         inputs = all_fields[:-2]
@@ -34,19 +29,9 @@ def test_model(model, criterion,  dset_loader, logger_name=None):
         labels = labels.to(device)
 
         with torch.set_grad_enabled(False):
-            '''
-            torch.cuda.synchronize()
-            torch.cuda.synchronize()
-            ta = time.perf_counter()
-            '''
             outputs = model(*inputs)
             loss = criterion(outputs, labels)
 
-            '''
-            torch.cuda.synchronize()
-            tb = time.perf_counter()
-            print('time: {:.02e}s'.format((tb - ta) / 64))
-            '''
             _, preds = torch.max(outputs, 1)
 
         running_loss += loss.item() * inputs[0].size(0)
@@ -54,15 +39,6 @@ def test_model(model, criterion,  dset_loader, logger_name=None):
 
         print('%d / %d'%(idx, len(dset_loader)))
         
-        '''
-        if idx == 10:
-            break
-        '''
-    '''
-    torch.cuda.synchronize()
-    tb = time.perf_counter()
-    print('time: {:.02e}s'.format((tb - ta)/(idx * 64)))
-    '''
     test_loss = running_loss / len(dset_loader.dataset)
     test_acc = running_corrects.double() / len(dset_loader.dataset)
 
@@ -71,19 +47,19 @@ def test_model(model, criterion,  dset_loader, logger_name=None):
                             'Test', test_loss, test_acc))
 
 def main():
-    model_folder = '../exp/cub/bcnnvd_cub3/checkpoints'
+    model_folder = '../exp/aircrafts/imp_bcnn_densenet_adam_lr-1e-4_size_448_fclr-1e-2/checkpoints'
     model_path = os.path.join(model_folder, 'model_best.pth.tar')
     dataset = 'cub'
     crop_from_size = [448]
     input_size = [448]
     batch_size = 64
-    model_names_list = ['vgg']
+    model_names_list = ['densenet']
     pooling_method = 'outer_product' 
     embedding = 8192
     order = 2
-    matrix_sqrt_iter = 0
+    matrix_sqrt_iter = 5 
     fc_bottleneck = False
-    demo_agg = False
+    proj_dim = 128
     # TODO: need the meta file including: crop_from_size, input_size,
     # model_names_list, pooling_method, fine_tune, pre_train, embedding, order 
     # matrix_sqrt_iter, fc_bottleneck, demo_agg
@@ -115,8 +91,8 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = create_bcnn_model(model_names_list, len(dset_test.classes), 
                     pooling_method, False, True, embedding, order,
-                    m_sqrt_iter=matrix_sqrt_iter, demo_agg=demo_agg,
-                    fc_bottleneck=fc_bottleneck)
+                    m_sqrt_iter=matrix_sqrt_iter,
+                    fc_bottleneck=fc_bottleneck, proj_dim=proj_dim)
     model = model.to(device)
     model = torch.nn.DataParallel(model)
     criterion = nn.CrossEntropyLoss()

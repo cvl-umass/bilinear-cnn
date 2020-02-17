@@ -13,6 +13,7 @@ import sys
 import time
 import shutil
 from BCNN_exp import create_bcnn_model
+import matplotlib.pyplot as plt
 
 def test_model(model, dset_loader, logger_name=None, mean_vector=None):
 
@@ -21,52 +22,83 @@ def test_model(model, dset_loader, logger_name=None, mean_vector=None):
     device = next(model.parameters()).device
     model.eval()
 
-    sum_vecotr = None
+    num_classes = dset_loader.dataset.get_num_classes()
+
+    sum_vector = [None] * num_classes
     count = 0
-    sum_correlation = None
-    variance_vector = None
-    sum_diff = None
+    sum_correlation = [None] * num_classes
+    variance_vector = [None] * num_classes
+    sum_diff = [None] * num_classes
+    count = [0] * num_classes
+
     for idx, all_fields in enumerate(dset_loader):
         labels = all_fields[-2]
         inputs = all_fields[:-2]
         inputs = [x.to(device) for x in inputs]
         labels = labels.to(device)
-        count += (inputs[0].shape[0] * inputs[0].shape[2] * inputs[0].shape[3])
+
+        l_bs = labels.unique()
+
+        # count += (inputs[0].shape[0] * inputs[0].shape[2] * inputs[0].shape[3])
 
         with torch.set_grad_enabled(False):
-            outputs, features = model(*inputs)
-            # loss = criterion(outputs, labels)
-            if mean_vector is None and sum_vecotr is None:
-                sum_vector = features[0].sum(dim=3).sum(dim=2).sum(dim=0)
-            elif mean_vector is None:
-                sum_vector += features[0].sum(dim=3).sum(dim=2).sum(dim=0)
-            else:
-                x = features[0] - mean_vector.view(1,-1,1,1)
-                if sum_diff is None:
-                    sum_diff = x.copy()
-                else:
-                    sum_diff += ((x * x).sum(dim=3).sum(dim=2).sum(dim=0))
+            outputs_, features_ = model(*inputs)
+            features_ = features_[0]
 
-                bs, c1, h1, w1 = x.shape
-                x = x.view(bs, c1, h1*w1)
-                correlation = torch.bmm(x, torch.transpose(x, 1, 2)) 
-                if sum_correlation is None:
-                    sum_correlation = correlation
-                else:
-                    sum_correlation += correlation
+            for lb in [x.item() for x in l_bs]:
+                select = labels == lb
+                features = features_[select,:,:,:]
+                count[lb] += (
+                        torch.sum(select).item() *
+                        inputs[0].shape[2] *
+                        inputs[0].shape[3]
+                )
 
-            # _, preds = torch.max(outputs, 1)
+                if mean_vector is None and sum_vector[lb] is None:
+                    sum_vector[lb] = features.sum(dim=3).sum(dim=2).sum(dim=0)
+                elif mean_vector is None:
+                    sum_vector[lb] += features.sum(dim=3).sum(dim=2).sum(dim=0)
+                else:
+                    x = features - mean_vector[lb].view(1,-1,1,1)
+                    if sum_diff[lb] is None:
+                        sum_diff[lb] = ((x * x).sum(dim=3).sum(dim=2).sum(dim=0))
+                    else:
+                        sum_diff[lb] += ((x * x).sum(dim=3).sum(dim=2).sum(dim=0))
+
+                    bs, c1, h1, w1 = x.shape
+                    x = x.view(bs, c1, h1*w1)
+                    correlation = torch.bmm(x, torch.transpose(x, 1, 2)).sum(dim=0)
+                    if sum_correlation[lb] is None:
+                        sum_correlation[lb] = correlation
+                    else:
+                        sum_correlation[lb] += correlation
+
+                # _, preds = torch.max(outputs, 1)
 
         print('%d / %d'%(idx, len(dset_loader)))
 
     if mean_vector is None:
-        mean_vector = sum_vector / count
+        mean_vector = [
+                sum_v / count_lb for sum_v, count_lb in zip(sum_vector, count)
+        ]
+        # mean_vector = sum_vector / count
         return mean_vector
     else:
-        std_vec = (sum_diff / count) ** 0.5
-        normalizatin = std_vec.view(-1, 1) * std_vec.view(1, -1)
-        mean_correlation = sum_correlation / count
-        mean_correlation = mean_correlation / normlaization
+        std_vec = [
+                (sum_diff_v / count_v) ** 0.5 
+                for sum_diff_v, count_v in zip(sum_diff, count)
+        ]
+        # std_vec = (sum_diff / count) ** 0.5
+        # normalization = std_vec.view(-1, 1) * std_vec.view(1, -1)
+        normalization = [
+                stdv.view(-1, 1) * stdv.view(1, -1) for stdv in std_vec
+        ]
+        # mean_correlation = sum_correlation / count
+        # mean_correlation = mean_correlation / normalization 
+        mean_correlation = [
+            sum_c / norm /count_v 
+            for sum_c, count_v, norm in zip(sum_correlation, count, normalization)
+        ]
         return mean_correlation
         
     # if logger_name is not None:
@@ -77,6 +109,10 @@ def test_model(model, dset_loader, logger_name=None, mean_vector=None):
 def main(args):
     model_folder = '../exp/%s/%s/checkpoints'%(args.dataset, args.exp_dir)
     model_path = os.path.join(model_folder, 'model_best.pth.tar')
+    if not os.path.isfile(model_path):
+        model_folder = '../exp/%s/%s/init_checkpoints'%(args.dataset, args.exp_dir)
+        model_path = os.path.join(model_folder, 'model_best.pth.tar')
+
     dataset = args.dataset 
     input_size = args.input_size 
 
@@ -176,17 +212,59 @@ def main(args):
     mean_vector = test_model(model, dset_loader['train'], None, None)
     correlation = test_model(model, dset_loader['train'], None, mean_vector)
 
-    indices = correlation.triu(1).nonzero().transpose(1, 0)
-    off_diag = correlation[indices[0], indices[1]]
-    plt.hist(off_diag, bins=200, density=True)
+    # abs_correlation = torch.abs(correlation)
+    abs_correlation = [torch.abs(corr) for corr in correlation]
 
+    # row_sum = abs_correlation.sum(dim=1)
+    row_sum = [abs_corr.sum(dim=1) for abs_corr in abs_correlation]
+
+    # row_off_diag = 1 - 1 / row_sum
+    row_off_diag = [1 - 1 / rs for rs in row_sum]
+
+    # mean per-category per-row off-diagonal correlation ratio
+    mean_row_off_diag = torch.mean(torch.cat(row_off_diag))
+    # mean_row_off_diag = row_off_diag.mean()
+
+    # get the histogram for per-category off-diagonal values
+    indices = correlation[0].triu(1).nonzero().transpose(1, 0)
+    off_diag = torch.cat([corr[indices[0], indices[1]] for corr in correlation])
+    mean_off_diag = torch.abs(off_diag).mean()
+
+    plt.hist(off_diag.cpu().detach().numpy(), bins=200, density=True)
     model_saved_path = os.path.dirname(model_path)
+    plt.savefig(os.path.join(model_saved_path, 'dist_corr'))
+    plt.close()
+
+    # aggregate the correlation for all catrogries into [C x dim x dim] for saving
+    correlation = torch.cat(
+            [torch.unsqueeze(x, dim=0) for x in correlation],
+            dim=0
+    ) 
     np.save(
         os.path.join(model_saved_path, 'correlation'),
         correlation.cpu().detach().numpy()
     )
 
-    plt.savefig(os.path.join(model_saved_path, 'dist_corr'))
+
+    if not os.path.isdir(os.path.join(model_saved_path, 'correlation_fig')):
+        os.makedirs(os.path.join(model_saved_path, 'correlation_fig'))
+
+    for idx, abs_corr in enumerate(abs_correlation):
+        plt.imshow(abs_corr.cpu().detach().numpy(), vmin=0, vmax=1)
+        plt.colorbar()
+        plt.savefig(
+            os.path.join(
+                model_saved_path,
+                'correlation_fig',
+                'correlation_fig_%d'%(idx + 1)
+            )
+        )
+        plt.close()
+
+    output_text = 'mean row ratio of off diagonal to the diagonal: %.4f\n'%mean_row_off_diag.item()
+    output_text += 'mean off diagonal: %.4f\n'%mean_off_diag.item()
+    with open(os.path.join(model_saved_path, 'log_correlation.txt'), 'w') as f:
+        f.write(output_text)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -428,6 +428,18 @@ def create_bcnn_model(model_names_list, num_classes,
         pooling_fn = SecondOrderGammaDemocratic(dim_list[0] ** 2, gamma=gamma, sinkhorn_t=0.5,
                                                 sinkhorn_iter=10)
     elif pooling_method == 'sketch_gamma_demo':
+        pooling_fn = SketchGammaDemocratic(
+                dim_list,
+                embedding_dim,
+                gamma=gamma,
+                sinkhorn_t=0.5,
+                sinkhorn_iter=10,
+                update_sketch=update_sketch
+        )
+    else:
+        raise ValueError('Unknown pooling method: %s' % pooling_method)
+
+    learn_proj = True if proj_dim > 0 else False
     return BCNNModule(
             num_classes,
             feature_extractors,
