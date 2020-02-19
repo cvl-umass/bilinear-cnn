@@ -58,14 +58,14 @@ def initialize_optimizer(model_ft, lr, optimizer='sgd', wd=0, finetune_model=Tru
                 {'params': params_to_update},
                 {'params': proj_params_to_update,
                  'weight_decay': proj_wd, 'lr': proj_lr},
-                {'params': fc_params_to_update, 'weight_decay': 0, 'lr': 1e-2}],
+                {'params': fc_params_to_update, 'weight_decay': 1e-5, 'lr': 1e-2}],
                 lr=lr, momentum=0.9, weight_decay=wd)
         elif optimizer == 'adam':
             optimizer_ft = optim.Adam([
                 {'params': params_to_update},
                 {'params': proj_params_to_update,
                  'weight_decay': proj_wd, 'lr': proj_lr},
-                {'params': fc_params_to_update, 'weight_decay': 0, 'lr': 1e-2}],
+                {'params': fc_params_to_update, 'weight_decay': 1e-5, 'lr': 1e-2}],
                 lr=lr, weight_decay=wd,
                 betas=(beta1, beta2))
         else:
@@ -459,7 +459,8 @@ def main(args):
                                     wd=args.wd, finetune_model=fine_tune,
                                     beta1=args.beta1, beta2=args.beta2)
 
-        if 'inat' not in args.dataset:
+        # if 'inat' not in args.dataset:
+        if True:
             scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
                                 lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
         else:
@@ -509,13 +510,13 @@ if __name__ == '__main__':
             help='number of epochs for initializing fc layer')
     parser.add_argument('--init_lr', default=1.0, type=float,
             help='learning rate')
-    parser.add_argument('--lr', default=1e-3, type=float,
+    parser.add_argument('--lr', default=1e-4, type=float,
             help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float,
             help='weight decay')
     parser.add_argument('--init_wd', default=1e-8, type=float,
             help='weight decay for initializing fc layer')
-    parser.add_argument('--optimizer', default='sgd', type=str,
+    parser.add_argument('--optimizer', default='adam', type=str,
             help='optimizer sgd|adam')
     parser.add_argument('--exp_dir', default='exp', type=str,
             help='foldername where to save the results for the experiment')
