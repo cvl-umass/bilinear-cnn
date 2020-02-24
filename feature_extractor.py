@@ -98,3 +98,39 @@ class Inception(nn.Module):
         x = self.model.Mixed_7c(x)
 
         return x
+
+# Conv1 features are not returned
+class VGG_all_conv_features(nn.Module):
+    def __init__(self):
+        super(VGG_all_conv_features, self).__init__()
+        # default ceil_mode for MaxPool2d is False, not sure if I shoulde chage it 
+        # to True
+        vgg_pretrained = models.vgg16(pretrained=True)
+        # add -1 to the index to remove the pooling layer
+        self.block1 = nn.Sequential(*list(vgg_pretrained.features.children())[:5-1])
+        self.block2 = nn.Sequential(*list(vgg_pretrained.features.children())[5:10-1])
+        self.block3 = nn.Sequential(*list(vgg_pretrained.features.children())[10:17-1])
+        self.block4 = nn.Sequential(*list(vgg_pretrained.features.children())[17:24-1])
+        self.block5 = nn.Sequential(*list(vgg_pretrained.features.children())[24:-1])
+
+        self.pooling = nn.MaxPool2d(kernel_size=2, stride=2)
+
+    def get_feature_dims(self):
+        return (128, 256, 512, 512)
+
+    def forward(self, x):
+        x1 = self.block1(x)
+        x1_ = self.pooling(x1)
+
+        x2 = self.block2(x1_)
+        x2_ = self.pooling(x2)
+
+        x3 = self.block3(x2_)
+        x3_ = self.pooling(x3)
+
+        x4 = self.block4(x3_)
+        x4_ = self.pooling(x4)
+
+        x5 = self.block5(x4_)
+
+        return x2, x3, x4, x5 

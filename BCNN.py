@@ -65,6 +65,53 @@ def set_parameter_requires_grad(model, requires_grad):
         for param in model.parameters():
             param.requires_grad = True
 
+# This implementation only works for VGG networks 
+class MultiHeadsBCNN(nn.Module):
+    def __init__(self, num_classes, feature_extractors=None):
+        super(MultiHeadsBCNN, self).__init__()
+        self.feature_extractors = feature_extractors
+        dim_all_layers = feature_extractors.get_feature_dims()
+        self.pooling_fn_list = nn.ModuleList(
+                [TensorProduct([dim] * 2) for dim in dim_all_layers]
+        )
+        self.feature_dim_list = [
+                pooling_fn.get_output_dim()
+                for pooling_fn in self.pooling_fn_list
+        ]
+        self.fc_list = nn.ModuleList(
+                [nn.Linear(feature_dim, num_classes, bias=True)
+                for feature_dim in self.feature_dim_list]
+        )
+
+    def forward(self, x):
+        relu_acts = self.feature_extractors(x)
+
+        bs, _, h1, w1 = x.shape
+
+        bcnn_list = [
+                pooling_fn(z, z)
+                for z, pooling_fn in zip(relu_acts, self.pooling_fn_list)
+        ]
+        bcnn_list = [
+                z.view(bs, feature_dim)
+                for z, feature_dim in zip(bcnn_list, self.feature_dim_list)
+        ]
+
+        bcnn_list = [
+                torch.sqrt(F.relu(z) + 1e-5) - torch.sqrt(F.relu(-z) + 1e-5)
+                for z in bcnn_list
+        ]
+        
+        bcnn_list = [
+                torch.nn.functional.normalize(z) for
+                z in bcnn_list
+        ]
+
+        y = [fc(z) for z, fc in zip(bcnn_list, self.fc_list)]
+
+        return y
+
+
 class BCNNModule(nn.Module):
     def __init__(self, num_classes, feature_extractors=None,
             pooling_fn=None, order=2, m_sqrt_iter=0, demo_agg=False,
@@ -449,4 +496,9 @@ def create_bcnn_model(model_names_list, num_classes,
             fc_bottleneck=fc_bottleneck,
             learn_proj=learn_proj
     )
+
+def create_multi_heads_bcnn(num_classes):
+
+    backbone = fe.VGG_all_conv_features()
+    return MultiHeadsBCNN(num_classes, backbone)
 
