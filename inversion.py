@@ -243,8 +243,8 @@ def initialize_optimizer(model_ft, lr, wd=0):
     '''
     optimizer_ft = optim.SGD([
         {'params': fc_params_to_update},
-        {'params': fc_params_group_2, 'lr': lr * 0.1},
-        {'params': fc_params_group_3, 'lr': lr * 0.01}],
+        {'params': fc_params_group_2, 'lr': lr * 1},
+        {'params': fc_params_group_3, 'lr': lr * 1}],
         lr=lr, momentum=0.9, weight_decay=wd)
 
     return optimizer_ft
@@ -262,8 +262,7 @@ def inverting_categories(
     logger = logging.getLogger(logger_name)
     device = next(model.parameters()).device
     output_imgs = []
-    # for i in range(len(classes)):
-    for i in range(30):
+    for i in range(len(classes)):
         target_label = torch.tensor([i], dtype=torch.int64, device=device)
         logger.info('=' * 80 + '\nClass {}:'.format(classes[i]))
         img = torch.randn(
