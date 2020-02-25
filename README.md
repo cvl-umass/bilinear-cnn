@@ -6,7 +6,7 @@ This repository contains the code re-implementing the following papers on learni
 3. [Improved Bilinear Pooling with CNNs](http://vis-www.cs.umass.edu/bcnn/), Tsung-Yu Lin, and Subhransu Maji, BMVC 2017
 4. [Second-order Democratic Aggregation](http://vis-www.cs.umass.edu/o2dp/), Tsung-Yu Lin, Subhransu Maji and Piotr Koniusz, ECCV 2018
 
-The series of works investigate the models using second-order pooling of convolutional features and study the techniques to improve the representation power. We reproduced the results using the symmetric BCNN models. More details can be found in my PhD [thesis](http://vis-www.cs.umass.edu/papers/tsungyu_thesis.pdf).
+The series of works investigate the models using second-order pooling of convolutional features and study the techniques to improve the representation power. We reproduced the results using the symmetric BCNN models, which represent images as covariance matrices of CNN activations. More details can be found in my PhD [thesis](http://vis-www.cs.umass.edu/papers/tsungyu_thesis.pdf).
 
 In this repository, we provided the code for:
 1. training BCNN models
@@ -51,18 +51,24 @@ This will construct the BCNN models with ImageNet pretrained VGG-D as a backbone
 After the initialization of softmax classifier is done, the process of end-to-end fine-tuning will start automatically. The intermediate checkpoints, models, and the results can be found in the folder `../exp/cub/bcnn_vgg`. We used the split for training from Birds and Cars, and the (training + val) from Aircrafts during the training phases. This code base serves as the reimplementation of BCNN representations in Pytorch. For simplicity to provide a val set, we just put the 'test' set as val set in the code due to the lack of properly created validation set. The test accuracy can be read off direcly from the log file `train_history.txt`. Providing test set as val during training is tricky and should be strictly avoided for conducting experiments.
 
 ## Training Improved BCNN
-The following command is used to train the Improved-BCNN model with VGG-D as backbone. 
+Improved BCNN models improve BCNN models by normalizing the spectrum of covariance representations with matrix square root. The following command is used to train the Improved-BCNN models with VGG-D as backbone. 
     
     python train.py --lr 1e-4 --optimizer adam --matrix_sqrt_iter 5 --exp impbcnn_vgg --batch_size 16 --dataset cub --model_names_list vgg
     
-The intermediate checkpoints, models, and the results can be found in the folder `../exp/cub/impbcnn_vgg`.
+The intermediate checkpoints, models, and the results can be found in the folder `../exp/cub/impbcnn_vgg`. The accuracy could be further improved by using a deeper backbone network such as DenseNet in some cases. As using full covariance matrices of high-dimensional DesnNet features (1920 x 1920) is prohibited, we add a layer to reduce the feature dimension before computing second order representations. The target dimension of the projectin can be given by the argument `proj_dim`. The following command is used to train the Improved-BCNN models with DenseNet:
+
+    python train.py --lr 1e-4 --optimizer adam --matrix_sqrt_iter 5 --exp impbcnn_desnsenet --batch_size 16 --dataset cub --model_names_list densenet --proj_dim 128 
+    
+| Datasets    |   Birds  |   Cars   |   Aircrafts    |
+| :---        |  :----:  |   :---:  |     :--:       |
+| Birds       |   87.5%  |   92.9%  |     90.6%      | 
 
 ## Training Second-order democratic aggregation
 The following command is used to train second-order democratic pooling with VGG-D as backbone. 
 
     python train.py --lr 1e-4 --optimizer adam --exp democratic_vgg --dataset cub --batch_size 16 --pooling_method gamma_demo --model_names_list vgg
     
-The intermediate checkpoints, models, and the results can be found in the folder `../exp/cub/democratic_vgg`.
+The intermediate checkpoints, models, and the results can be found in the folder `../exp/cub/democratic_vgg`. The 
 
 ## Visualizing the invariance of fine-grained categories by inversion of BCNN models
 The visual properties of fine-grained categories captured by BCNN models can be visualized by finding the maximal images that are confidently predicted as the target categories. We can achieve these images by 'inverting' the models. The following command is used to run the inversion of BCNN models for Birds dataset:
