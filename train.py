@@ -280,7 +280,7 @@ def main(args):
 
     args.exp_dir = os.path.join(args.dataset, args.exp_dir)
 
-    if args.dataset in ['cars', 'aircrafts']:
+    if args.dataset in ['cars', 'aircrafts', 'mit_indoor']:
         keep_aspect = False
     else:
         keep_aspect = True
@@ -351,6 +351,8 @@ def main(args):
         from CarsDataset import CarsDataset as dataset
     elif args.dataset == 'aircrafts':
         from AircraftsDataset import AircraftsDataset as dataset
+    elif args.dataset == 'mit_indoor':
+        from MITIndoorDataset import MITIndoorDataset as dataset
     elif 'inat' in args.dataset:
         from iNatDataset import iNatDataset as dataset
         if args.dataset == 'inat':
@@ -459,12 +461,8 @@ def main(args):
                                     wd=args.wd, finetune_model=fine_tune,
                                     beta1=args.beta1, beta2=args.beta2)
 
-        # if 'inat' not in args.dataset:
-        if True:
-            scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
-                                lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
-        else:
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'max')
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optim,
+                            lr_lambda=lambda epoch: 0.1 ** (epoch // 25))
 
         logger_name = 'train_logger'
         logger = initializeLogging(os.path.join(exp_root, args.exp_dir,
