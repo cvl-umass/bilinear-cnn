@@ -32,6 +32,8 @@ In particular, we provide the code for:
 3. training the CNN models with second-order democratic aggregation
 4. inverting fine-grained categories with BCNN representations
 
+The prerequisite can be installed by `pip install -r requirements.txt`.
+
 Links to the original implementations in Matlab and MatConvNet can
 be found in the project webpages.
 Please cite the appropriate papers if you find this code
@@ -45,17 +47,25 @@ download the data (you can start with the CUB dataset first).
 * Caltech-UCSD Birds: [CUB-200-2011 dataset](http://www.vision.caltech.edu/visipedia/CUB-200-2011.html).
 * FGVC Aircrafts: [FGVC aircraft dataset](http://www.robots.ox.ac.uk/~vgg/data/oid/)
 * Stanford Cars: [Stanford cars dataset](http://ai.stanford.edu/~jkrause/cars/car_dataset.html)
+* MIT Indoor: [MIT indoor scenes dataset](http://web.mit.edu/torralba/www/indoor.html)
 
 The results obtained from using the code in this repository are
 summarized in the following table. Note that the accuracy reported here are obtained by
 the softmax classifier instead of SVM (unlike the ICCV15 paper).
-
 
 | Datasets    | BCNN [VGG-D]  |   Improved BCNN [VGG-D]   |
 | :---        |    :----:     |           :---:           |
 | Birds       |    84.1%      |           85.5%           |
 | Cars        |    90.5%      |           92.5%           |
 | Aircrafts   |    87.5%      |           90.7%           |
+
+
+## Pre-trained models
+We provide fine-tuned [BCNN](http://maxwell.cs.umass.edu/bcnn/pytorch_models/bcnn_vgg/) and [Improved BCNN](http://maxwell.cs.umass.edu/bcnn/pytorch_models/impbcnn_vgg/) models on VGG. In addition, we also provide the fine-tuned [Improved BCNN](http://maxwell.cs.umass.edu/bcnn/pytorch_models/impbcnn_densenet/) models on DenseNet. All the models can be download together in the [tar.gz file](http://maxwell.cs.umass.edu/bcnn/pytorch_models/pytorch_bcnn_pretrained_models.tar.gz). We provide the code to evaluate the pre-trained models. The models are assumed in the folder `pretrained_models`. You can run the following commands to evaluate the models:
+
+     python test.py --pretrained_filename bcnn_vgg/cub_bcnn_vgg_models.pth.tar --dataset cub
+     python test.py --pretrained_filename impbcnn_vgg/cub_impbcnn_vgg_models.pth.tar --dataset cub --matrix_sqrt_iter 5
+     python test.py --model_names_list densenet --proj_dim 128 --pretrained_filename impbcnn_densenet/cub_impbcnn_densenet_models.pth.tar --dataset cub --matrix_sqrt_iter 5
 
 ## Training bilinear CNN
 The following command is used to train the BCNN model with VGG-D as
@@ -129,7 +139,11 @@ The following command is used to train a DenseNet based model:
 | Accuracy       |   87.5%  |   92.9%  |     90.6%      | 
 
 ## Training second-order democratic aggregation
-The following command is used to train a model with second-order democratic pooling with VGG-D as backbone. 
+This provides an alternative to reweighting feature importance by democratic aggregation. The approach can be combined with Tensor Sketch to reduce feature dimension. The following commands reproducing the result (84.3% accuracy) on MIT Indoor dataset without end-to-end fine-tuning using ResNet-101 reported in ECCV'18 paper:
+
+    python train.py --init_lr 1 --init_wd 1e-5 --optimizer sgd --exp democratic_resnet_sketch --dataset mit_indoor --pooling_method sketch_gamma_demo --model_names_list resnet --no_finetune --init_epoch 70 
+    
+The accuracy can be read off from the log file `train_init_history.txt` located in `../exp/cub/sketch_gamma_demo`. You can also train the model end-to-end. The following command is used to train the model with VGG-D as backbone. 
 
     python train.py --lr 1e-4 --optimizer adam --exp democratic_vgg --dataset cub --batch_size 16 --pooling_method gamma_demo --model_names_list vgg
     
