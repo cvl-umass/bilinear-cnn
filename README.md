@@ -53,11 +53,11 @@ The results obtained from using the code in this repository are
 summarized in the following table. Note that the accuracy reported here are obtained by
 the softmax classifier instead of SVM (unlike the ICCV15 paper).
 
-| Datasets    | BCNN [VGG-D]  |   Improved BCNN [VGG-D]   |
-| :---        |    :----:     |           :---:           |
-| Birds       |    84.1%      |           85.5%           |
-| Cars        |    90.5%      |           92.5%           |
-| Aircrafts   |    87.5%      |           90.7%           |
+| Datasets    | BCNN [VGG-D]  |   Improved BCNN [VGG-D]   |   Improved BCNN [DenseNet201]
+| :---        |    :----:     |           :---:           |     :--:
+| Birds       |    84.1%      |           85.5%           |     87.5%
+| Cars        |    90.5%      |           92.5%           |     92.9%
+| Aircrafts   |    87.5%      |           90.7%           |     90.6%
 
 
 ## Pre-trained models
@@ -181,4 +181,4 @@ You can find the output images as shown in the following in the folder:
 ![example-6](inv_images/014.Indigo_Bunting.png) 
 ![example-7](inv_images/017.Cardinal.png)
 ![example-8](inv_images/019.Gray_Catbird.png)
-![example-9](inv_images/024.Red_faced_Cormorant.png) 
+![example-9](inv_images/024.Red_faced_Cormorant.png)
